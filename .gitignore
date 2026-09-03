@@ -1,5 +1,11 @@
+# dependencies & local stores
 node_modules/
+.pnpm-store/
+
+# build output
 lib/
 *.tgz
+
+# OS / editor junk
 .DS_Store
 *.log
