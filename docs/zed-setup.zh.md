@@ -53,9 +53,10 @@ command 换成绝对路径），否则 GUI 启动的 Zed 看不到 fnm/nvm 的 P
       下一回合生效。
 - [ ] 6. 斜杠技能：`/` 菜单列出命令 + **已安装的 user-invocable skill**
       （`~/.agents/skills` 全局、工程 `.agents/skills`/`.dsh/skills` 局部均出现）；
-      列表按“命令在前、skill 在后”分区，skill 描述带 `Skill: ` 前缀
+      命名沿用 pi-acp 惯例：skill 以 `/skill:find-skills` 形式出现在列表，
+      命令保持原名（`/permission`、`/compact` 等），按“命令块 + skill 块”分区
       （Zed 1.18 无 agent 侧 Commands/Skills/Actions 分组）；
-      `/permission`/`/compact` 等命令可执行，选一个 skill（如 `/find-skills`）
+      `/permission`/`/compact` 等命令可执行，选一个 skill（如 `/skill:find-skills`）
       回车 → agent 装载该 skill 指令并按其行事。
 - [ ] 7. 会话历史（Zed ≥ v0.225）：关闭线程后从 recent threads 恢复 →
       `session/resume`（或 load）后继续对话，上下文连贯。
@@ -74,4 +75,4 @@ command 换成绝对路径），否则 GUI 启动的 Zed 看不到 fnm/nvm 的 P
 | stdout 出现非 JSON 行 | 违反不变量 → 报告（launcher 不应写 stdout） |
 | 会话历史不出现 | 需同 cwd（工作区）且会话已 close（flush）过 |
 | `/` 菜单没有 skill | skill 需 user-invocable 且位于 dsh 扫描根：`~/.agents/skills`、`$DSH_HOME/skills`、工程 `.agents/skills` / `.dsh/skills`；装入/移除后本会话实时刷新，新会话必刷 |
-| `/skill名` 回车后不生效 | 观察工具卡是否出现 `Load skill …`（dsh tool-skill pre-step 装载）；stderr 有 skill 相关告警则贴出 |
+| `/skill:名` 回车后不生效 | 观察工具卡是否出现 `Load skill …`（bridge 把 `/skill:名` 归一为 `/名` 后由 dsh tool-skill pre-step 装载）；stderr 有 skill 相关告警则贴出 |

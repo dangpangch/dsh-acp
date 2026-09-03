@@ -59,8 +59,8 @@
 | elicitation | userQuestions provider + conn.createElicitation（client capability 门控） |
 | 权限档 | config option `permission`（permissionPresets.set），P3 |
 | MCP | 本轮不做：非空 mcpServers → invalidParams（如实拒绝） |
-| 斜杠目录 | `available_commands_update` = 命令平面（ctx.commands）+ **user-invocable skills**（ctx.skills，cwd=会话 cwd、scope=record.agent；Zed 1.18 对 external ACP agent 只认 available_commands，客户端 skill 不进 `/` 菜单） |
-| skill 执行 | 无需桥接：选中 `/skill` 作为普通 `/name` 用户文本进入模型，dsh tool-skill pre-step 展开为 skill 正文（同 dsh Web "/" UX）；变更经 `skills/change`/`commands/change` 实时重通告 |
+| 斜杠目录 | `available_commands_update` = 命令平面（ctx.commands）+ **user-invocable skills**（ctx.skills，cwd=会话 cwd、scope=record.agent；Zed 1.18 对 external ACP agent 只认 available_commands，客户端 skill 不进 `/` 菜单）。命名沿用 pi-acp 惯例：skill 通告为 `skill:<name>`（弹窗 `/skill:find-skills`），命令保持原名，命令块 + skill 块分区 |
+| skill 执行 | prompt 文本块先归一化 `skill:<name>` → 裸 `/name` 手势，再作为普通用户文本进入模型，dsh tool-skill pre-step 展开为 skill 正文（同 dsh Web "/" UX）；变更经 `skills/change`/`commands/change` 实时重通告 |
 | agentPresets 行 | 本包 cordis.patch.yml insert（default: standard）；CLI boot 自动补 shipped root；dev boot 用 fixture overlay |
 
 ## 4. 验证命令

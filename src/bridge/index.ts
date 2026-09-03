@@ -83,7 +83,7 @@ import {
   usageUpdate,
 } from './updates.js'
 import { replayPlanFold, replayUpdatesForEvent } from './replay.js'
-import { mergeSlashCatalog, type SlashCatalogEntry, type SlashCommandEntry, type SlashSkillEntry } from './catalog.js'
+import { mergeSlashCatalog, normalizeSkillSlashText, type SlashCatalogEntry, type SlashCommandEntry, type SlashSkillEntry } from './catalog.js'
 import {
   currentEffortFor,
   guardReasoningEffort,
@@ -1223,6 +1223,14 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       guardCurrentEffort(record)
       const inflight = createInflight()
       record.inflight = inflight
+      // Picked `/skill:<name>` entries arrive as literal prompt text; rewrite
+      // each text block's word-bounded `skill:<name>` tokens back to the bare
+      // `/name` gesture dsh's tool-skill pre-step expands (its gesture regex
+      // accepts only `/kebab-name`), so a skill picked from the Zed popup
+      // loads exactly like the dsh Web "/" menu one.
+      const prompt = params.prompt.map((block) =>
+        block.type === 'text' ? { ...block, text: normalizeSkillSlashText(block.text) } : block,
+      )
       let admissionFailed = false
       let admissionFailure: unknown
       try {
@@ -1232,7 +1240,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         // Slash commands run on the command plane and never enter the model
         // history (design §6.6); an unknown or malformed slash falls back to
         // an ordinary prompt below.
-        const line = slashLine(params.prompt)
+        const line = slashLine(prompt)
         if (line !== undefined) {
           if (commands === undefined) throw internalError('no command runtime is mounted')
           inflight.waitForIdle = true
@@ -1240,7 +1248,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
           const exec = await commands.execute(
             record.agent,
             line,
-            encodedImages(params.prompt),
+            encodedImages(prompt),
             inflight.admissionController.signal,
           )
           if (exec !== undefined) {
@@ -1254,7 +1262,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
           }
         }
         if (inflight.commandExecuted !== true) {
-          const images = scanPrompt(params.prompt, imagePromptEnabled)
+          const images = scanPrompt(prompt, imagePromptEnabled)
           inflight.admissionController.signal.throwIfAborted()
           let imageRefs: readonly ImageAttachmentRef[] = []
           if (images.length > 0) {
@@ -1265,7 +1273,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
           if (agents.get(record.agent.id) !== record.agent) {
             throw internalError('prompt was not queued: the agent was disposed outside the bridge')
           }
-          const content = contentForPrompt(params.prompt, imageRefs)
+          const content = contentForPrompt(prompt, imageRefs)
           const message = createUserMessage({
             content: content as unknown as ContentBlock[],
             source: { kind: 'user' },

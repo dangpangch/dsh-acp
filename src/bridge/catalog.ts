@@ -5,19 +5,18 @@
 // connections; for an external ACP agent the ONLY slash surface is the
 // `available_commands` the agent announces (the message editor validates any
 // typed `/name` against that list). dsh keeps commands and skills in separate
-// registries (`ctx.commands` and `ctx.skills`), and its own Web composer
-// exposes both under "/": commands run on the command plane, and picking a
-// user-invocable skill inserts its `/name` token, which the `tool-skill`
-// pre-step hook expands into the skill body for the model. This module merges
-// the two catalogs the same way so the bridge can announce one honest slash
-// list. Pure + sync so the merge is unit-testable offline.
+// registries (`ctx.commands` and `ctx.skills`). This module merges the two
+// catalogs so the bridge announces one honest slash list. Pure + sync so the
+// merge is unit-testable offline.
 //
-// Presentation choices (Zed has no agent-side way to split the popup into
-// Commands/Skills/Actions — those groups are client-only for native agents):
-//  * Commands are announced first, user-invocable skills second, each block in
-//    registry order — a stable partition instead of one alphabetized soup, so
-//    the flat popup reads as a command block then a skill block.
-//  * Skill descriptions gain a visible "Skill: " prefix for hover tooltips.
+// Naming: like pi-acp's skill commands, skills are announced under the
+// `skill:<name>` prefix (`/skill:find-skills`). The bridge's prompt handler
+// normalizes a typed `/skill:<name>` back into the bare `/name` gesture so the
+// dsh `tool-skill` pre-step hook expands the skill body for the model — the
+// same loading path the dsh Web "/" menu uses. Commands keep their plain
+// names, and the announcement is partitioned commands-first then skills so the
+// flat Zed popup reads as two blocks. Skill descriptions stay plain (the
+// `skill:` prefix already marks them in the list).
 //
 // Adapted from the zed-dsh project (https://github.com/dangpangch/zed-dsh, MIT)
 // — same-author port; design.zh.md §6.6 and protocol-map.md §1 still apply.
@@ -46,28 +45,39 @@ export interface SlashCatalogEntry {
   readonly input?: string | null
 }
 
-/** Display marker added to skill descriptions in the slash popup. */
-const SKILL_DESCRIPTION_PREFIX = 'Skill: '
+/** Slash-name prefix under which user-invocable skills are announced. */
+export const SKILL_SLASH_PREFIX = 'skill:'
+
+/**
+ * Normalize one text block's skill tokens back to bare gestures. Zed sends the
+ * picked completion verbatim (`/skill:find-skills`), but dsh's `tool-skill`
+ * pre-step hook recognizes only the bare `/name` shape (its gesture regex does
+ * not accept a colon), so each `skill:<name>` token is rewritten to `/name`
+ * before the prompt reaches the model. Only word-bounded `/skill:<kebab>`
+ * tokens are touched; anything else passes through untouched.
+ */
+export function normalizeSkillSlashText(text: string): string {
+  return text.replace(/(^|\s)\/skill:([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$)/g, '$1/$2')
+}
 
 /**
  * Merge command-plane entries with user-invocable skills into one slash
- * catalog. Registered commands win name collisions (a same-named skill token
- * would never reach the model), non-user-invocable skills stay out (picking
- * one would silently no-op), and the result is partitioned: every command
- * first in registry order, then every skill in registry order. Within each
- * block the caller's order is preserved (both dsh registries already return
- * name-sorted rows), so announcement folds stay stable across sessions and
- * catalog refreshes while the flat popup separates the two kinds visually.
+ * catalog. Skills are announced as `skill:<name>` entries (mirroring pi-acp so
+ * the popup reads `/skill:find-skills`); non-user-invocable skills stay out
+ * (picking one would silently no-op). The result is partitioned: every command
+ * first in registry order, then every skill in registry order, so the flat Zed
+ * popup separates the two kinds visually. Commands keep plain names, so a
+ * command and a skill can never collide on the wire.
  */
 export function mergeSlashCatalog(
   commands: readonly SlashCommandEntry[],
   skills: readonly SlashSkillEntry[],
 ): SlashCatalogEntry[] {
-  const seen = new Set<string>()
   const entries: SlashCatalogEntry[] = []
+  const commandNames = new Set<string>()
   for (const command of commands) {
-    if (seen.has(command.name)) continue
-    seen.add(command.name)
+    if (commandNames.has(command.name)) continue
+    commandNames.add(command.name)
     entries.push({
       name: command.name,
       description: command.description,
@@ -76,11 +86,12 @@ export function mergeSlashCatalog(
         : {}),
     })
   }
+  const skillNames = new Set<string>()
   for (const skill of skills) {
     if (!skill.userInvocable) continue
-    if (seen.has(skill.name)) continue
-    seen.add(skill.name)
-    entries.push({ name: skill.name, description: SKILL_DESCRIPTION_PREFIX + skill.description })
+    if (skillNames.has(skill.name)) continue
+    skillNames.add(skill.name)
+    entries.push({ name: SKILL_SLASH_PREFIX + skill.name, description: skill.description })
   }
   return entries
 }
