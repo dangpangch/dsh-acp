@@ -48,8 +48,6 @@ export function turnEndToStopReason(kind: DshTurnEndKind): AcpStopReason {
       return 'max_tokens'
     case 'interrupted':
       return 'cancelled'
-    default:
-      return 'end_turn'
   }
 }
 

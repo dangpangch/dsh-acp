@@ -6,6 +6,10 @@ node_modules/
 lib/
 *.tgz
 
+# local agent skills & skill registry lock
+.agents/
+skills-lock.json
+
 # OS / editor junk
 .DS_Store
 *.log

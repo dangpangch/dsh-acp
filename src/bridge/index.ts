@@ -84,7 +84,7 @@ import {
 } from './updates.js'
 import { replayPlanFold, replayUpdatesForEvent } from './replay.js'
 import { mergeSlashCatalog, normalizeSkillSlashText, type SlashCatalogEntry, type SlashCommandEntry, type SlashSkillEntry } from './catalog.js'
-import { rawInputOf, toolCallTitle, toolKindFor } from './tool-cards.js'
+import { rawInputOf, toolCallTitle, toolKindFor, toolResultCall } from './tool-cards.js'
 import {
   currentEffortFor,
   guardReasoningEffort,
@@ -224,30 +224,9 @@ interface LlmCatalogService {
   }>
 }
 
-interface SessionStoreService {
-  flush(session: { readonly id: SessionId }): Promise<boolean>
-}
-
 type AttachmentsService = {
   readonly imageLimits: { readonly mediaTypes: readonly string[] }
   saveImages(inputs: readonly { mediaType: string; data: Uint8Array }[]): Promise<readonly ImageAttachmentRef[]>
-}
-
-/** The tool call id and visible text of one tool-result message (cards). */
-function toolResultCall(message: { content: readonly ContentBlock[] }): { callId: string; text: string } {
-  let callId = ''
-  let text = ''
-  const collect = (blocks: readonly ContentBlock[]) => {
-    for (const block of blocks) {
-      if (block.type === 'text') text += block.text
-      else if (block.type === 'tool-result') {
-        if (callId === '') callId = block.toolCallId
-        collect(block.content)
-      }
-    }
-  }
-  collect(message.content)
-  return { callId, text }
 }
 
 /** The slash-command line when the prompt starts with '/', else undefined. */
@@ -508,9 +487,11 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     if (skills !== undefined) {
       try {
         const summaries = await skills.list({ cwd: record.cwd, scope: record.agent })
-        skillEntries = summaries
-          .filter((skill) => skill.invocation.userInvocable)
-          .map((skill) => ({ name: skill.name, description: skill.description, userInvocable: true }))
+        skillEntries = summaries.map((skill) => ({
+          name: skill.name,
+          description: skill.description,
+          userInvocable: skill.invocation.userInvocable,
+        }))
       } catch (error: unknown) {
         logger.warn(`dsh-acp-interactive: skill catalog unavailable for slash list: ${errorChain(error)}`)
       }
@@ -742,7 +723,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         description: 'One-shot permission preset for this session (sandbox mode + approval policy).',
         category: 'permission',
         currentValue: names.includes(currentValue) ? currentValue : names[1]!,
-        options: permissionSelectOptions(names).map((option) => ({ value: option.value, name: option.name, description: null })),
+        options: permissionSelectOptions(names),
       })
     }
     return out

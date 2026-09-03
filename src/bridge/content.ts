@@ -53,7 +53,6 @@ function decodeImage(block: Extract<AcpContentBlock, { type: 'image' }>): Admitt
   const mediaType = block.mimeType
   if (!CANONICAL_BASE64.test(block.data)) throw new AcpContentError('image data must be canonical base64', 'invalid')
   const data = Buffer.from(block.data, 'base64')
-  if (data.toString('base64') !== block.data) throw new AcpContentError('image data must be canonical base64', 'invalid')
   return { mediaType, data }
 }
 

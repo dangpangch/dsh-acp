@@ -14,7 +14,25 @@
 // execute-kind card therefore carries the concrete command line itself, like a
 // native Zed terminal card. Every other kind keeps the plain tool name; Zed
 // shows those arguments through its raw-input disclosure instead.
-import type {} from '@agentclientprotocol/sdk'
+/** First tool-result call id + concatenated visible text of one result message. */
+export function toolResultCall(message: {
+  content: readonly unknown[]
+}): { callId: string; text: string } {
+  let callId = ''
+  let text = ''
+  const collect = (blocks: readonly unknown[]) => {
+    for (const block of blocks) {
+      const typed = block as { type?: string; text?: string; toolCallId?: string; content?: unknown }
+      if (typed.type === 'text') text += typed.text ?? ''
+      else if (typed.type === 'tool-result') {
+        if (callId === '') callId = typed.toolCallId ?? ''
+        if (Array.isArray(typed.content)) collect(typed.content as readonly unknown[])
+      }
+    }
+  }
+  collect(message.content)
+  return { callId, text }
+}
 
 /** ACP tool-kind vocabulary used by the wire cards (schema `ToolKind`). */
 export type ToolKindName = 'execute' | 'edit' | 'search' | 'read' | 'delete' | 'think' | 'other'

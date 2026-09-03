@@ -54,13 +54,10 @@ export function effortOptionsFor(
 ): readonly EffortLevel[] | undefined {
   const declared = reasoning?.efforts
   if (declared !== undefined && declared.length > 0) return declared
-  if (reasoning?.defaultEffort !== undefined) return undefined // unreachable: declared nonempty implies default validity is checked upstream
-  if (declared !== undefined) {
-    // The model exposes reasoning metadata but no efforts (upstream rejects
-    // that as INVALID_MODEL_REASONING, so this only guards a degraded adapter):
-    // keep the canonical fallback so the picker still works.
-    return CANONICAL_REASONING_LEVELS
-  }
+  // Reasoning metadata without efforts only reaches this from a degraded
+  // adapter (upstream rejects it as INVALID_MODEL_REASONING); keep the
+  // canonical fallback for every other case so the picker never disappears.
+  if (reasoning?.defaultEffort !== undefined) return undefined
   return CANONICAL_REASONING_LEVELS
 }
 
@@ -101,9 +98,7 @@ export function guardReasoningEffort<T extends { reasoningEffort?: string }>(
   request: T,
   supported: ReadonlySet<string> | undefined,
 ): T {
-  if (request.reasoningEffort === undefined) return request
-  if (supported === undefined) return request
-  if (supported.has(request.reasoningEffort)) return request
+  if (request.reasoningEffort === undefined || supported === undefined || supported.has(request.reasoningEffort)) return request
   const { reasoningEffort: _stripped, ...rest } = request
   return rest as T
 }

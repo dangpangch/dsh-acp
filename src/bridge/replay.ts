@@ -10,25 +10,8 @@
 // mapping is unit-testable offline.
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { SessionNotification } from '@agentclientprotocol/sdk'
-import { assistantTextChunk, assistantThoughtChunk, foldTodoPlan, toolCallContent } from './updates.js'
-import { rawInputOf, toolCallTitle, toolKindFor } from './tool-cards.js'
-
-/** First tool-result call id + concatenated visible text of a result message. */
-function toolResultCall(message: { content: readonly unknown[] }): { callId: string; text: string } {
-  let callId = ''
-  let text = ''
-  const collect = (blocks: readonly { type?: string; text?: string; toolCallId?: string; content?: unknown }[]) => {
-    for (const block of blocks) {
-      if (block.type === 'text') text += block.text ?? ''
-      else if (block.type === 'tool-result') {
-        if (callId === '') callId = block.toolCallId ?? ''
-        if (Array.isArray(block.content)) collect(block.content as { type?: string; text?: string; toolCallId?: string; content?: unknown }[])
-      }
-    }
-  }
-  collect(message.content as { type?: string; text?: string; toolCallId?: string; content?: unknown }[])
-  return { callId, text }
-}
+import { assistantTextChunk, assistantThoughtChunk, foldTodoPlan, planUpdate, toolCallContent } from './updates.js'
+import { rawInputOf, toolCallTitle, toolKindFor, toolResultCall } from './tool-cards.js'
 
 /**
  * Map one stored session event to the wire updates a `session/load` replay
@@ -96,5 +79,5 @@ export function replayUpdatesForEvent(event: SessionEvent): SessionNotification[
 export function replayPlanFold(events: readonly SessionEvent[]): SessionNotification['update'] | undefined {
   const entries = foldTodoPlan(events)
   if (entries === undefined || entries.length === 0) return undefined
-  return { sessionUpdate: 'plan', entries: entries.map((entry) => ({ content: entry.content, priority: 'medium', status: entry.status })) }
+  return planUpdate(entries)
 }

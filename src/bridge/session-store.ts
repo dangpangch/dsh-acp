@@ -97,14 +97,6 @@ export class SessionStore {
     return this.records.get(id)
   }
 
-  /** Return the bridge-owned record for a session id (impostor guard). */
-  owned(id: SessionId, agent?: Agent): SessionRecord | undefined {
-    const record = this.records.get(id)
-    if (record === undefined) return undefined
-    if (agent !== undefined && record.agent !== agent) return undefined
-    return record
-  }
-
   add(record: SessionRecord): void {
     this.records.set(record.id, record)
   }
@@ -122,25 +114,10 @@ export class SessionStore {
   }
 }
 
-/** Promise + externally callable resolvers (ES2023 lib has no withResolvers). */
-function resolvers<T>(): {
-  promise: Promise<T>
-  resolve(value: T): void
-  reject(error: unknown): void
-} {
-  let resolve!: (value: T) => void
-  let reject!: (error: unknown) => void
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res
-    reject = rej
-  })
-  return { promise, resolve, reject }
-}
-
 /** Allocate a fresh single-flight prompt slot (factory keeps transitions honest). */
 export function createInflight(): PromptInflight {
-  const admission = resolvers<void>()
-  const completion = resolvers<AcpStopReason>()
+  const admission = Promise.withResolvers<void>()
+  const completion = Promise.withResolvers<AcpStopReason>()
   return {
     promise: completion.promise,
     resolve: (stopReason: AcpStopReason) => completion.resolve(stopReason),

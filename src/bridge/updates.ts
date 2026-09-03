@@ -35,9 +35,6 @@ export function planUpdate(entries: readonly { content: string; status: 'pending
   }
 }
 
-/** Empty plan (turn/start clearing — sent only after a plan was ever shown). */
-export const EMPTY_PLAN = planUpdate([])
-
 /** Context-window `usage_update` (used/size; unknown sides never emit). */
 export function usageUpdate(used: number, size: number): SessionNotification['update'] {
   return { sessionUpdate: 'usage_update', used, size }
