@@ -2,8 +2,12 @@
 node_modules/
 .pnpm-store/
 
-# build output
-lib/
+# NOTE: lib/ is intentionally committed (not ignored): remote git installs via
+# `dsh plugin --profile acp add <git-url>` need the prebuilt bundle, and we keep
+# installs free of build scripts (pnpm 11 would demand an allowBuilds entry).
+# Rebuild after each change and commit lib/ together with the source.
+
+# npm tarballs
 *.tgz
 
 # local agent skills & skill registry lock
