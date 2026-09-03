@@ -18,6 +18,8 @@ external agent 使用。
   `usage_update`、`available_commands_update`（斜杠目录 = dsh 命令平面 +
   **user-invocable skills**：全局 `~/.agents/skills`、工程 `.agents/skills`/`.dsh/skills`
   安装的 skill 出现在 Zed `/` 菜单；选中即经 dsh skill 装载并执行）。
+  通告顺序为命令在前、skill 在后（Zed 1.18 没有 agent 侧的
+  Commands/Skills/Actions 分组，故以分区顺序 + skill 的 `Skill: ` 描述前缀区分）。
 - 会话选项（configOptions，Zed 下拉）：Model、Thought Level、Write permission。
 - 权限：一次性 `session/request_permission`（allow-once / reject-once），无持久 grant。
 - 认证：`authenticate`（env `DEEPSEEK_API_KEY` 或 dsh web Models 配置的凭据）；

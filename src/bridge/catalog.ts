@@ -12,6 +12,13 @@
 // the two catalogs the same way so the bridge can announce one honest slash
 // list. Pure + sync so the merge is unit-testable offline.
 //
+// Presentation choices (Zed has no agent-side way to split the popup into
+// Commands/Skills/Actions — those groups are client-only for native agents):
+//  * Commands are announced first, user-invocable skills second, each block in
+//    registry order — a stable partition instead of one alphabetized soup, so
+//    the flat popup reads as a command block then a skill block.
+//  * Skill descriptions gain a visible "Skill: " prefix for hover tooltips.
+//
 // Adapted from the zed-dsh project (https://github.com/dangpangch/zed-dsh, MIT)
 // — same-author port; design.zh.md §6.6 and protocol-map.md §1 still apply.
 
@@ -39,34 +46,41 @@ export interface SlashCatalogEntry {
   readonly input?: string | null
 }
 
+/** Display marker added to skill descriptions in the slash popup. */
+const SKILL_DESCRIPTION_PREFIX = 'Skill: '
+
 /**
- * Merge command-plane entries with user-invocable skills into one
- * deterministic slash catalog. Commands win name collisions (a registered
- * command executes on the command plane and a same-named skill token would
- * never reach the model), non-user-invocable skills stay out (picking one
- * would silently no-op), and the result is name-sorted so announcement folds
- * are stable across sessions and catalog refreshes.
+ * Merge command-plane entries with user-invocable skills into one slash
+ * catalog. Registered commands win name collisions (a same-named skill token
+ * would never reach the model), non-user-invocable skills stay out (picking
+ * one would silently no-op), and the result is partitioned: every command
+ * first in registry order, then every skill in registry order. Within each
+ * block the caller's order is preserved (both dsh registries already return
+ * name-sorted rows), so announcement folds stay stable across sessions and
+ * catalog refreshes while the flat popup separates the two kinds visually.
  */
 export function mergeSlashCatalog(
   commands: readonly SlashCommandEntry[],
   skills: readonly SlashSkillEntry[],
 ): SlashCatalogEntry[] {
-  const byName = new Map<string, SlashCatalogEntry>()
+  const seen = new Set<string>()
+  const entries: SlashCatalogEntry[] = []
   for (const command of commands) {
-    if (!byName.has(command.name)) {
-      byName.set(command.name, {
-        name: command.name,
-        description: command.description,
-        ...(command.inputHint !== undefined && command.inputHint !== null && command.inputHint.length > 0
-          ? { input: command.inputHint }
-          : {}),
-      })
-    }
+    if (seen.has(command.name)) continue
+    seen.add(command.name)
+    entries.push({
+      name: command.name,
+      description: command.description,
+      ...(command.inputHint !== undefined && command.inputHint !== null && command.inputHint.length > 0
+        ? { input: command.inputHint }
+        : {}),
+    })
   }
   for (const skill of skills) {
     if (!skill.userInvocable) continue
-    if (byName.has(skill.name)) continue
-    byName.set(skill.name, { name: skill.name, description: skill.description })
+    if (seen.has(skill.name)) continue
+    seen.add(skill.name)
+    entries.push({ name: skill.name, description: SKILL_DESCRIPTION_PREFIX + skill.description })
   }
-  return [...byName.values()].sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))
+  return entries
 }

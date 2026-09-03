@@ -53,6 +53,8 @@ command 换成绝对路径），否则 GUI 启动的 Zed 看不到 fnm/nvm 的 P
       下一回合生效。
 - [ ] 6. 斜杠技能：`/` 菜单列出命令 + **已安装的 user-invocable skill**
       （`~/.agents/skills` 全局、工程 `.agents/skills`/`.dsh/skills` 局部均出现）；
+      列表按“命令在前、skill 在后”分区，skill 描述带 `Skill: ` 前缀
+      （Zed 1.18 无 agent 侧 Commands/Skills/Actions 分组）；
       `/permission`/`/compact` 等命令可执行，选一个 skill（如 `/find-skills`）
       回车 → agent 装载该 skill 指令并按其行事。
 - [ ] 7. 会话历史（Zed ≥ v0.225）：关闭线程后从 recent threads 恢复 →
