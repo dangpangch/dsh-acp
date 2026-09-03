@@ -83,6 +83,7 @@ import {
   usageUpdate,
 } from './updates.js'
 import { replayPlanFold, replayUpdatesForEvent } from './replay.js'
+import { mergeSlashCatalog, type SlashCatalogEntry, type SlashCommandEntry, type SlashSkillEntry } from './catalog.js'
 import {
   currentEffortFor,
   guardReasoningEffort,
@@ -179,6 +180,26 @@ interface CommandRuntimeSeam {
   ): Promise<{ result: { kind: 'success' | 'error'; text?: string } } | undefined>
 }
 
+/**
+ * The dsh skill registry read seam (user-invocable slash skills, design §6.6).
+ * Skills are layered per agent scope, so the bridge lists through the live
+ * record's agent (mirroring how dsh-tool-skill builds its lookup). Only
+ * `userInvocable` skills are announced: they are the human-facing slash
+ * surface whose `/name` gesture dsh's pre-step hook expands into the skill
+ * body for the model.
+ */
+interface SkillRegistrySeam {
+  list(options?: {
+    cwd?: string | undefined
+    scope?: unknown
+    signal?: AbortSignal | undefined
+  }): Promise<readonly {
+    name: string
+    description: string
+    invocation: { readonly modelInvocable: boolean; readonly userInvocable: boolean }
+  }[]>
+}
+
 /** Preserve invalid-parameter detail in the SDK wire error message. */
 function invalidParams(detail: string): RequestError {
   return RequestError.invalidParams(undefined, detail)
@@ -269,6 +290,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   const llm = ctx.get('llm') as LlmCatalogService | undefined
   const attachments = ctx.get('attachments') as AttachmentsService | undefined
   const commands = ctx.get('commands') as CommandRuntimeSeam | undefined
+  const skills = ctx.get('skills') as SkillRegistrySeam | undefined
   const projections = ctx.get('sessionProjections') as UsageProjectionService | undefined
   const presets = ctx.get('agentPresets') as AgentPresetsSeam | undefined
   const query = ctx.get('sessionQuery') as SessionQuerySeam | undefined
@@ -467,6 +489,77 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       }))
       pushUsage(record)
     })
+  }
+
+  /**
+   * Announce the session's slash catalog as one `available_commands_update`.
+   * The list merges the dsh command plane (`ctx.commands`, e.g. goal /
+   * permission / plan / compact / feedback) with **user-invocable skills**
+   * (`ctx.skills`, sourced from the same global/project roots Zed reads —
+   * `~/.agents/skills` and `<project>/.agents/skills`), because Zed 1.18 only
+   * surfaces slash entries for an external ACP agent through
+   * `available_commands_update` and validates any typed `/name` against that
+   * list. Commands win name collisions; skills the user may not invoke stay
+   * out. Execution needs no extra bridge code: a picked skill reaches the
+   * prompt as a plain `/name` user text, and dsh's `tool-skill` pre-step hook
+   * expands that gesture into the skill body for the model — exactly the dsh
+   * Web "/"-menu behavior.
+   */
+  const slashCatalogFor = async (record: SessionRecord): Promise<SlashCatalogEntry[]> => {
+    const commandEntries: SlashCommandEntry[] = []
+    if (commands !== undefined) {
+      for (const descriptor of commands.list(record.agent)) {
+        commandEntries.push({
+          name: descriptor.name,
+          description: descriptor.description,
+          ...(descriptor.input?.hint !== undefined && descriptor.input.hint.length > 0
+            ? { inputHint: descriptor.input.hint }
+            : {}),
+        })
+      }
+    }
+    let skillEntries: SlashSkillEntry[] = []
+    if (skills !== undefined) {
+      try {
+        const summaries = await skills.list({ cwd: record.cwd, scope: record.agent })
+        skillEntries = summaries
+          .filter((skill) => skill.invocation.userInvocable)
+          .map((skill) => ({ name: skill.name, description: skill.description, userInvocable: true }))
+      } catch (error: unknown) {
+        logger.warn(`dsh-acp-interactive: skill catalog unavailable for slash list: ${errorChain(error)}`)
+      }
+    }
+    return mergeSlashCatalog(commandEntries, skillEntries)
+  }
+
+  /** Deferred slash-catalog announcement (Zed ignores unknown-session updates). */
+  const announceSlashCatalog = (record: SessionRecord): void => {
+    setTimeout(() => {
+      void slashCatalogFor(record)
+        .then((entries) => {
+          if (entries.length === 0 || record.closed) return
+          deliver(record, commandsUpdate(entries))
+        })
+        .catch((error: unknown) => {
+          logger.warn(`dsh-acp-interactive: slash catalog announcement failed: ${errorChain(error)}`)
+        })
+    }, 0)
+  }
+
+  // Keep every open session's slash popup fresh when either catalog source
+  // changes (a skill installed into ~/.agents/skills or <project>/.agents/skills
+  // while a Zed thread is open must appear without recreating the thread).
+  // The registry change events ride the same host context the rows mount on.
+  if (commands !== undefined || skills !== undefined) {
+    const refreshAll = (): void => {
+      for (const record of store.list()) announceSlashCatalog(record)
+    }
+    // `skills/change` and `commands/change` are declared on the host-plane
+    // registry modules (@deepseek-ai/dsh-skill, @deepseek-ai/dsh-commands) that
+    // this bundle does not import; subscribe through the untyped context.
+    const host = ctx as unknown as { on(event: string, listener: () => void): unknown }
+    host.on('skills/change', refreshAll)
+    host.on('commands/change', refreshAll)
   }
 
   // ── dsh event firehose -> wire updates ────────────────────────────────────
@@ -987,20 +1080,10 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         void sessions.flush(record.agent.session).catch((error: unknown) => {
           logger.warn(`dsh-acp-interactive: background persistence flush failed: ${String(error)}`)
         })
-        // Slash catalog: deferred past the session/new response — Zed ignores
-        // notifications for session ids it does not know yet (design §6.6).
-        if (commands !== undefined) {
-          setTimeout(() => {
-            const descriptors = commands.list(record.agent)
-            if (descriptors.length > 0 && !record.closed) {
-              deliver(record, commandsUpdate(descriptors.map((command) => ({
-                name: command.name,
-                description: command.description,
-                ...(command.input?.hint !== undefined && command.input.hint.length > 0 ? { input: command.input.hint } : {}),
-              }))))
-            }
-          }, 0)
-        }
+        // Slash catalog (commands + user-invocable skills): deferred past the
+        // session/new response — Zed ignores notifications for session ids it
+        // does not know yet (design §6.6).
+        announceSlashCatalog(record)
         return { sessionId, configOptions }
       } catch (error: unknown) {
         if (store.get(sessionId) === record) store.remove(sessionId, record)
@@ -1056,18 +1139,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         void sessions.flush(record.agent.session).catch((error: unknown) => {
           logger.warn(`dsh-acp-interactive: background persistence flush failed: ${String(error)}`)
         })
-        if (commands !== undefined) {
-          setTimeout(() => {
-            const descriptors = commands.list(record.agent)
-            if (descriptors.length > 0 && !record.closed) {
-              deliver(record, commandsUpdate(descriptors.map((command) => ({
-                name: command.name,
-                description: command.description,
-                ...(command.input?.hint !== undefined && command.input.hint.length > 0 ? { input: command.input.hint } : {}),
-              }))))
-            }
-          }, 0)
-        }
+        announceSlashCatalog(record)
         if (params.replay && query !== undefined) {
           const snapshot = await query.readSession(sessionId)
           await replayHistory(record, snapshot.events)

@@ -31,6 +31,7 @@
 - `ctx.userQuestions.registerProvider(provider)`（elicitation 的 UI provider seam，仅一个 provider）。
 - `ctx.agentPresets`（AgentPresets）：`defaultId`、`resolve(id?)/mount(agentCtx, id?)/composeFrom/recompose`；**agent 平面工具/提示由 preset 提供**，推荐在 `agents.create` 的 `setup` 里 `await agentPresets.mount(agentCtx, id)`（creation header `agentPreset` 记录 id）。
 - `ctx.sessionProjections.snapshot(...).values.contextPressure`（usage_update 源）；`ctx.attachments.saveImages`（识图）；`ctx.commands.list/execute`（斜杠）；`ctx.llm.listProviders/listModels/resolveModelInfo`（configOptions）；approval seam `ctx.on('approval/request', (request,next)=>...)`。
+- `ctx.skills`（dsh-skill 注册表，base 已挂 `skill`/`skill-filesystem`/`tool-skill` 行）：`list({cwd, scope, signal})` 按 agent scope 合并各层 provider catalog，摘要带 `invocation.{modelInvocable,userInvocable}`；`tool-skill` 的 `agent/pre-step` 会把用户消息里的 `/name` 手势展开为 skill 正文注入模型（与 Web GUI "/" 选 skill 同一条路）。`dsh-client-ui-skill` 在 Web 把 user-invocable skills 作为 `/` 触发源（order 2），onPick 只插入 `/name ` 文本，真正执行靠 pre-step 展开 —— **不是命令平面**。
 - 官方 `@deepseek-ai/dsh-acp` 为 automation-only（fresh-only、committed-only），不与 Zed 交互要求兼容 —— 本插件即其交互档补充（形态：dsh plugin 而非独立 server）。
 
 ### 2.4 进程/生命周期（实测）
@@ -58,6 +59,8 @@
 | elicitation | userQuestions provider + conn.createElicitation（client capability 门控） |
 | 权限档 | config option `permission`（permissionPresets.set），P3 |
 | MCP | 本轮不做：非空 mcpServers → invalidParams（如实拒绝） |
+| 斜杠目录 | `available_commands_update` = 命令平面（ctx.commands）+ **user-invocable skills**（ctx.skills，cwd=会话 cwd、scope=record.agent；Zed 1.18 对 external ACP agent 只认 available_commands，客户端 skill 不进 `/` 菜单） |
+| skill 执行 | 无需桥接：选中 `/skill` 作为普通 `/name` 用户文本进入模型，dsh tool-skill pre-step 展开为 skill 正文（同 dsh Web "/" UX）；变更经 `skills/change`/`commands/change` 实时重通告 |
 | agentPresets 行 | 本包 cordis.patch.yml insert（default: standard）；CLI boot 自动补 shipped root；dev boot 用 fixture overlay |
 
 ## 4. 验证命令

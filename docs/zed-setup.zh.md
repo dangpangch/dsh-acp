@@ -51,7 +51,10 @@ command 换成绝对路径），否则 GUI 启动的 Zed 看不到 fnm/nvm 的 P
 - [ ] 4. 流式：长回答文本增量可见；思考流式可见（若模型启用）。
 - [ ] 5. 会话选项：线程齿轮菜单能切 Model / Thought Level / Write permission；
       下一回合生效。
-- [ ] 6. 斜杠技能：`/` 菜单列出命令，`/permission`/`/compact` 等可执行。
+- [ ] 6. 斜杠技能：`/` 菜单列出命令 + **已安装的 user-invocable skill**
+      （`~/.agents/skills` 全局、工程 `.agents/skills`/`.dsh/skills` 局部均出现）；
+      `/permission`/`/compact` 等命令可执行，选一个 skill（如 `/find-skills`）
+      回车 → agent 装载该 skill 指令并按其行事。
 - [ ] 7. 会话历史（Zed ≥ v0.225）：关闭线程后从 recent threads 恢复 →
       `session/resume`（或 load）后继续对话，上下文连贯。
 - [ ] 8. ask 表单：agent 触发提问时（若有模型行为触发）出现表单可作答。
@@ -68,3 +71,5 @@ command 换成绝对路径），否则 GUI 启动的 Zed 看不到 fnm/nvm 的 P
 | GUI Zed 找不到 dsh | command 用绝对路径（见 examples） |
 | stdout 出现非 JSON 行 | 违反不变量 → 报告（launcher 不应写 stdout） |
 | 会话历史不出现 | 需同 cwd（工作区）且会话已 close（flush）过 |
+| `/` 菜单没有 skill | skill 需 user-invocable 且位于 dsh 扫描根：`~/.agents/skills`、`$DSH_HOME/skills`、工程 `.agents/skills` / `.dsh/skills`；装入/移除后本会话实时刷新，新会话必刷 |
+| `/skill名` 回车后不生效 | 观察工具卡是否出现 `Load skill …`（dsh tool-skill pre-step 装载）；stderr 有 skill 相关告警则贴出 |

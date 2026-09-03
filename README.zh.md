@@ -15,7 +15,9 @@ external agent 使用。
 - 会话：`session/new · list · load · resume · close · delete`
   （持久化会话历史基于 dsh 的 session-query/persistence；`load` 按 ACP 语义回放提交内容）。
 - 流式/渲染：`agent_message_chunk`、thought 流式、tool 卡片、plan(todo 折叠)、
-  `usage_update`、`available_commands_update`（斜杠命令）。
+  `usage_update`、`available_commands_update`（斜杠目录 = dsh 命令平面 +
+  **user-invocable skills**：全局 `~/.agents/skills`、工程 `.agents/skills`/`.dsh/skills`
+  安装的 skill 出现在 Zed `/` 菜单；选中即经 dsh skill 装载并执行）。
 - 会话选项（configOptions，Zed 下拉）：Model、Thought Level、Write permission。
 - 权限：一次性 `session/request_permission`（allow-once / reject-once），无持久 grant。
 - 认证：`authenticate`（env `DEEPSEEK_API_KEY` 或 dsh web Models 配置的凭据）；
@@ -33,7 +35,7 @@ MCP 挂载（非空 `mcpServers` 拒绝并给出说明）、细粒度 diff 卡�
 pnpm install
 pnpm typecheck      # tsc --noEmit
 pnpm build          # tsdown -> lib/
-pnpm test           # vitest（65 项；含真实 spawn 的帧纯净与会话历史探针）
+pnpm test           # vitest（71 项；含真实 spawn 的帧纯净与会话历史探针）
 node scripts/history-probe.mjs   # 会话历史端到端（隔离 DSH_HOME）
 ```
 
@@ -41,6 +43,7 @@ node scripts/history-probe.mjs   # 会话历史端到端（隔离 DSH_HOME）
 
 ```
 src/bridge/index.ts     插件入口（AgentSideConnection + 会话生命周期）
+src/bridge/catalog.ts   斜杠目录合并（命令平面 + user-invocable skills；纯函数）
 src/bridge/replay.ts    持久历史 → ACP 回放帧（纯函数）
 src/bridge/{codec,updates,content,config-options,session-store}.ts  移植自 zed-dsh(MIT)
 src/dev-bin.ts          独立 dev/test boot（dsh-base + 本包 patch + presets fixture）
