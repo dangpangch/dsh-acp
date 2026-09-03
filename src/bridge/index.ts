@@ -18,7 +18,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { randomUUID } from 'node:crypto'
-import { isAbsolute } from 'node:path'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 import { Readable, Writable } from 'node:stream'
 import {
   AgentSideConnection,
@@ -28,12 +28,17 @@ import {
   type AuthenticateRequest,
   type CancelNotification,
   type CloseSessionRequest,
+  type DeleteSessionRequest,
   type InitializeRequest,
   type InitializeResponse,
+  type ListSessionsRequest,
+  type ListSessionsResponse,
+  type LoadSessionRequest,
   type NewSessionRequest,
   type NewSessionResponse,
   type PromptRequest,
   type PromptResponse,
+  type ResumeSessionRequest,
   type SessionNotification,
   type Stream,
 } from '@agentclientprotocol/sdk'
@@ -41,8 +46,13 @@ import { installModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-
 import { createUserMessage, errorChain, ReasoningEffortId, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { Agent, AgentCancelCause } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-user-approval'
-import { SessionId as brandSessionId, type SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId as brandSessionId, type Session, type SessionEvent, type SessionId } from '@deepseek-ai/dsh-session'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import type { AskUserQuestionAnswer, AskUserQuestionRequest } from '@deepseek-ai/dsh-user-questions'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { rmSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
+
 import type { ContentBlock as AcpContentBlock } from '@agentclientprotocol/sdk'
 import {
   AcpContentError,
@@ -72,10 +82,12 @@ import {
   toolCallContent,
   usageUpdate,
 } from './updates.js'
+import { replayPlanFold, replayUpdatesForEvent } from './replay.js'
 import {
   currentEffortFor,
   guardReasoningEffort,
   modelSelectOptionList,
+  permissionSelectOptions,
   PROVIDER_DEFAULT_REASONING_EFFORT,
   thoughtLevelOptionOptions,
   type CatalogProvider,
@@ -86,7 +98,7 @@ import {
 export const name = 'dsh-acp-interactive'
 
 /** Agent spine services this bridge programs (validated on the rc.2 baseline). */
-export const inject = ['agents', 'sessions']
+export const inject = ['agents', 'sessions', 'sessionQuery', 'sessionPersistence']
 
 /** Deployment route defaults; per-session config options may override. */
 export interface BridgeConfig {
@@ -105,7 +117,11 @@ const AGENT_NAME = 'dsh-acp-interactive'
 const AGENT_VERSION = '0.1.0'
 const CONFIG_ID_MODEL = 'model'
 const CONFIG_ID_THOUGHT_LEVEL = 'thought_level'
+const CONFIG_ID_PERMISSION = 'permission'
 const AUTH_ENV_KEY = 'DEEPSEEK_API_KEY'
+
+/** Canonical write-permission preset ids (mirrors the dsh-base permission row). */
+const PERMISSION_PRESETS = ['read-only', 'workspace-write', 'danger-full-access'] as const
 
 type WireConfigOptions = NonNullable<NewSessionResponse['configOptions']>
 
@@ -113,6 +129,36 @@ type WireConfigOptions = NonNullable<NewSessionResponse['configOptions']>
 interface AgentPresetsSeam {
   resolve(): { readonly id: string } | undefined
   mount(ctx: unknown, id: string): Promise<unknown>
+}
+
+/** Session-history query engine seam (session/list + load replay + titles). */
+interface SessionQuerySeam {
+  listSessions(signal?: AbortSignal): Promise<Array<{
+    header: { id: SessionId; cwd?: string; agentPreset?: string }
+    live: boolean
+    persisted: boolean
+  }>>
+  readSession(sessionId: SessionId): Promise<{
+    session: { cwd?: string; agentPreset?: string }
+    events: readonly SessionEvent[]
+  }>
+  readTitle(sessionId: SessionId, signal?: AbortSignal): Promise<{ title: string } | undefined>
+  listEvents(sessionId: SessionId, signal?: AbortSignal): Promise<Array<{ time: number }>>
+}
+
+/** Durable-session artifact locator (delete seam; the backend owns removal). */
+interface PersistenceSeam {
+  locate(header: { readonly id: SessionId }): { kind: string; path: string } | undefined
+}
+
+/** Write-permission preset seam (permission config option + /permission). */
+interface PermissionPresetsSeam {
+  set(session: Session, name: string): void
+}
+
+/** Human question UI seam for elicitation forms. */
+interface UserQuestionsSeam {
+  registerProvider(provider: { ask(request: unknown): Promise<{ answers: { id: string; selected: string[]; custom?: string }[] }> }): () => void
 }
 
 /** The projection read face the bridge uses for usage_update (token-meter unit). */
@@ -225,6 +271,10 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   const commands = ctx.get('commands') as CommandRuntimeSeam | undefined
   const projections = ctx.get('sessionProjections') as UsageProjectionService | undefined
   const presets = ctx.get('agentPresets') as AgentPresetsSeam | undefined
+  const query = ctx.get('sessionQuery') as SessionQuerySeam | undefined
+  const persistence = ctx.get('sessionPersistence') as PersistenceSeam | undefined
+  const permissionPresets = ctx.get('permissionPresets') as PermissionPresetsSeam | undefined
+  const userQuestions = ctx.get('userQuestions') as UserQuestionsSeam | undefined
   const store = new SessionStore()
   let closed = false
   let imagePromptEnabled = false
@@ -233,6 +283,12 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   // closes stdin right after its requests still receives every reply before
   // the process exits (acceptance.md §2 immediate-EOF smoke).
   const activeRequests = new Set<Promise<unknown>>()
+  // Latest ask_user_question tool call per session (elicitation tool tie).
+  const askCall = new Map<SessionId, string>()
+  const elicitationFormsEnabled = (): boolean => {
+    const capabilities = clientCapabilities as { elicitation?: { form?: unknown } } | undefined
+    return capabilities?.elicitation?.form !== undefined
+  }
 
   const assertOpen = (): void => {
     if (closed) throw internalError('the ACP bridge has been disposed')
@@ -426,6 +482,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         deliverAssistantMessage(record, event.data.turn, event.data.step, event.data.message.content)
         break
       case 'tool/call':
+        if (event.data.name === 'ask_user_question') askCall.set(record.id, String(event.data.callId))
         deliverToolCall(record, event.data)
         break
       case 'tool/result': {
@@ -596,6 +653,19 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         options: offered.map((effort) => ({ value: effort.id, name: effort.name, description: effort.description })),
       })
     }
+    if (permissionPresets !== undefined) {
+      const names = PERMISSION_PRESETS as readonly string[]
+      const currentValue = record.permission ?? (process.env.DSH_PERMISSION_MODE ?? 'workspace-write')
+      out.push({
+        type: 'select',
+        id: CONFIG_ID_PERMISSION,
+        name: 'Write permission',
+        description: 'One-shot permission preset for this session (sandbox mode + approval policy).',
+        category: 'permission',
+        currentValue: names.includes(currentValue) ? currentValue : names[1]!,
+        options: permissionSelectOptions(names).map((option) => ({ value: option.value, name: option.name, description: null })),
+      })
+    }
     return out
   }
 
@@ -624,6 +694,13 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         return
       }
       record.selection.current = { ...current, reasoningEffort: ReasoningEffortId(value) }
+      return
+    }
+    if (configId === CONFIG_ID_PERMISSION) {
+      if (permissionPresets === undefined) throw invalidParams('permission presets are not mounted')
+      if (!(PERMISSION_PRESETS as readonly string[]).includes(value)) throw invalidParams(`unknown permission preset: ${value}`)
+      record.permission = value
+      permissionPresets.set(record.agent.session, value)
       return
     }
     throw invalidParams(`unknown config option: ${configId}`)
@@ -664,28 +741,190 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     }
   }
 
+  // ── session history: list / load / resume / delete helpers ─────────────────
+  /** Look a persisted session up by id and return its stored header facts. */
+  const persistedHeader = async (sessionId: SessionId): Promise<{ cwd: string; agentPreset?: string } | undefined> => {
+    if (query === undefined) return undefined
+    const records = await query.listSessions()
+    const record = records.find((entry) => entry.header.id === sessionId && entry.persisted)
+    if (record === undefined) return undefined
+    const cwd = record.header.cwd
+    return cwd !== undefined && cwd.length > 0 ? { cwd, agentPreset: record.header.agentPreset } : undefined
+  }
+
+  /** Latest activity time of one session as an ISO string (best effort). */
+  const updatedAtFor = async (sessionId: SessionId): Promise<string | undefined> => {
+    if (query === undefined) return undefined
+    try {
+      const events = await query.listEvents(sessionId)
+      let latest = 0
+      for (const event of events) if (event.time > latest) latest = event.time
+      return latest > 0 ? new Date(latest).toISOString() : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /** Display title of one session (best effort; none -> undefined). */
+  const titleFor = async (sessionId: SessionId): Promise<string | undefined> => {
+    if (query === undefined) return undefined
+    try {
+      return (await query.readTitle(sessionId))?.title
+    } catch {
+      return undefined
+    }
+  }
+
+  /** Dispose and deregister a live bridge record for the id, if any. */
+  const releaseOnline = async (sessionId: SessionId): Promise<void> => {
+    const record = store.get(sessionId)
+    if (record === undefined) return
+    store.remove(sessionId, record)
+    await closeOne(record, { kind: 'disposed' })
+  }
+
+  /**
+   * Stream one persisted session's history to the client as wire updates
+   * (session/load semantics). Committed assistant content and tool cards from
+   * the raw log, ending with the folded plan state; raw deltas and usage never
+   * replay. Each frame is awaited in order so the load response never races it.
+   */
+  const replayHistory = async (record: SessionRecord, events: readonly SessionEvent[]): Promise<void> => {
+    record.replaying = true
+    try {
+      for (const event of events) {
+        if (record.closed) return
+        for (const update of replayUpdatesForEvent(event)) {
+          await notify(sessionNotification(record.id, update))
+        }
+      }
+      const plan = replayPlanFold(events)
+      if (plan !== undefined && !record.closed) await notify(sessionNotification(record.id, plan))
+    } finally {
+      record.replaying = false
+    }
+  }
+
+  /** One ordered "create-or-resume" agent handle for history loads. */
+  const resumeAgentFor = async (
+    sessionId: SessionId,
+    cwd: string,
+    selection: ModelSelectionRef,
+    agentPreset: string | undefined,
+  ): Promise<{ handle: Awaited<ReturnType<typeof agents.create>>; presetId: string | undefined }> => {
+    const defaults = defaultSelection()
+    if (defaults.provider !== undefined && defaults.model !== undefined) {
+      selection.current = { provider: defaults.provider, model: defaults.model }
+    }
+    let presetId = agentPreset
+    if (presetId === undefined) {
+      try {
+        presetId = presets?.resolve()?.id
+      } catch (error: unknown) {
+        logger.warn(`dsh-acp-interactive: default agent preset unavailable: ${errorChain(error)}`)
+      }
+    }
+    const agentOptions = defaults.provider !== undefined || defaults.model !== undefined
+      ? { provider: defaults.provider, model: defaults.model } as { provider?: string; model?: string }
+      : undefined
+    const handle = await agents.resume({
+      resumeSessionId: sessionId,
+      agentOptions,
+      setup: async (agentCtx) => {
+        installModelSelection(agentCtx, selection)
+        if (presetId !== undefined && presets !== undefined) {
+          await presets.mount(agentCtx, presetId)
+        }
+      },
+    })
+    return { handle, presetId }
+  }
+
+  /** Best-effort durable delete of one session artifact (idempotent). */
+  const deletePersisted = (header: { id: SessionId; cwd?: string }): void => {
+    if (process.env.DSH_ACP_DEBUG) console.error('[dbg] deletePersisted', header)
+    if (persistence === undefined) return
+    if (header.cwd === undefined || header.cwd.length === 0) {
+      logger.warn(`dsh-acp-interactive: durable delete skipped: session cwd is unknown`)
+      return
+    }
+    let location
+    try {
+      location = persistence.locate(header as { id: SessionId })
+    } catch (error: unknown) {
+      logger.warn(`dsh-acp-interactive: persistence locate failed: ${errorChain(error)}`)
+      return
+    }
+    if (location === undefined) return
+    const sessionsRoot = join(resolveDshHome(), 'sessions')
+    const artifact = location.path
+    if (process.env.DSH_ACP_DEBUG) console.error('[dbg] artifact', artifact, 'root', sessionsRoot)
+    if (!artifact.startsWith(sessionsRoot)) {
+      logger.warn(`dsh-acp-interactive: refusing to delete artifact outside the sessions root: ${artifact}`)
+      return
+    }
+    const sessionDir = dirname(artifact)
+    const leaf = basename(sessionDir)
+    const uuidLeaf = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(leaf)
+    const sessionUuidLeaf = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(leaf)
+    if (!uuidLeaf && !sessionUuidLeaf) {
+      logger.warn(`dsh-acp-interactive: refusing to delete unexpected artifact layout: ${artifact}`)
+      return
+    }
+    try {
+      rmSync(sessionDir, { recursive: true, force: true })
+      if (process.env.DSH_ACP_DEBUG) console.error('[dbg] removed', sessionDir)
+    } catch (error: unknown) {
+      if (process.env.DSH_ACP_DEBUG) console.error('[dbg] rm failed', String(error))
+      logger.warn(`dsh-acp-interactive: durable delete failed: ${errorChain(error)}`)
+    }
+  }
+
   // ── Agent implementation (SDK 1.4.0 Agent interface) ──────────────────────
   const implementation = {
     async initialize(params: InitializeRequest): Promise<InitializeResponse> {
       clientCapabilities = params.clientCapabilities ?? undefined
       imagePromptEnabled = await supportsImages()
+      // Truthful capability surface (protocol-map.md §1): session history is
+      // available whenever the session-query engine is composed; image prompts
+      // only when the attachment store and the default route both accept them;
+      // elicitation forms only when the client declared form support AND a
+      // question provider can be bridged. Nothing un-implemented is advertised.
+      const history = query !== undefined
       return {
         protocolVersion: PROTOCOL_VERSION,
         agentInfo: { name: AGENT_NAME, version: AGENT_VERSION },
         agentCapabilities: {
-          loadSession: false,
+          loadSession: history,
           promptCapabilities: { image: imagePromptEnabled, audio: false, embeddedContext: false },
-          sessionCapabilities: { close: {} },
+          sessionCapabilities: {
+            close: {},
+            ...(history ? { list: {}, delete: {}, resume: {} } : {}),
+          },
         },
-        authMethods: [],
+        authMethods: [{
+          id: 'env-deepseek-api-key',
+          name: 'DeepSeek API key',
+          description:
+            'Set the ' + AUTH_ENV_KEY + ' environment variable (or configure the key in the ' +
+            'dsh web Models settings / ~/.dsh/.credentials.yaml) and restart the agent.',
+        }],
       }
     },
 
     async authenticate(_params: AuthenticateRequest): Promise<void> {
       if (process.env[AUTH_ENV_KEY]?.trim()) return
+      const homeKey = process.env.DSH_HOME ?? resolveDshHome()
+      try {
+        const credentials = await readFile(join(homeKey, '.credentials.yaml'), 'utf8')
+        if (credentials.includes('apiKey') || credentials.includes('deepseek')) return
+      } catch {
+        /* missing credentials document — fall through to authRequired */
+      }
       throw RequestError.authRequired(
         undefined,
-        'no API key is configured; run `dsh-acp-zed login` from a terminal or set ' + AUTH_ENV_KEY,
+        'no API key is configured: set ' + AUTH_ENV_KEY + ' in the agent environment, or add a ' +
+          'DeepSeek API key through the dsh web Models settings (' + join(homeKey, '.credentials.yaml') + ') and restart.',
       )
     },
 
@@ -768,6 +1007,116 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         await closeOne(record, { kind: 'disposed' }).catch(() => {})
         throw error
       }
+    },
+
+    async listSessions(params: ListSessionsRequest): Promise<ListSessionsResponse> {
+      assertOpen()
+      if (query === undefined) throw invalidParams('session history is not available on this connection')
+      const records = await query.listSessions()
+      const want = params.cwd !== undefined && params.cwd !== null ? params.cwd : undefined
+      const sessions = []
+      for (const record of records) {
+        const cwd = record.header.cwd
+        if (cwd === undefined || cwd.length === 0) continue
+        if (want !== undefined && cwd !== want) continue
+        const id = record.header.id
+        const [title, updatedAt] = await Promise.all([titleFor(id), updatedAtFor(id)])
+        sessions.push({
+          sessionId: id,
+          cwd,
+          ...(title !== undefined ? { title } : {}),
+          ...(updatedAt !== undefined ? { updatedAt } : {}),
+        })
+      }
+      return { sessions }
+    },
+
+    /** Shared admission for load/resume over a persisted session. */
+    async prepareHistoryResume(params: { sessionId: string; cwd: string; replay: boolean }) {
+      assertOpen()
+      const sessionId = brandSessionId(params.sessionId)
+      const header = await persistedHeader(sessionId)
+      if (header === undefined) throw invalidParams(`unknown session: ${params.sessionId}`)
+      if (header.cwd !== params.cwd) {
+        throw invalidParams(`session ${params.sessionId} belongs to ${header.cwd}, not ${params.cwd}`)
+      }
+      await releaseOnline(sessionId)
+      const selection: ModelSelectionRef = { current: undefined, assembled: undefined }
+      const { handle, presetId } = await resumeAgentFor(sessionId, params.cwd, selection, header.agentPreset)
+      if (closed) {
+        await handle.dispose().catch(() => {})
+        throw internalError('connection closed during session load/resume')
+      }
+      const record = makeRecord(sessionId, params.cwd, handle, selection, clientCapabilities)
+      store.add(record)
+      try {
+        assertOpen()
+        const configOptions = await refreshConfigOptions(record)
+        assertOpen()
+        void sessions.flush(record.agent.session).catch((error: unknown) => {
+          logger.warn(`dsh-acp-interactive: background persistence flush failed: ${String(error)}`)
+        })
+        if (commands !== undefined) {
+          setTimeout(() => {
+            const descriptors = commands.list(record.agent)
+            if (descriptors.length > 0 && !record.closed) {
+              deliver(record, commandsUpdate(descriptors.map((command) => ({
+                name: command.name,
+                description: command.description,
+                ...(command.input?.hint !== undefined && command.input.hint.length > 0 ? { input: command.input.hint } : {}),
+              }))))
+            }
+          }, 0)
+        }
+        if (params.replay && query !== undefined) {
+          const snapshot = await query.readSession(sessionId)
+          await replayHistory(record, snapshot.events)
+        }
+        return { configOptions }
+      } catch (error: unknown) {
+        if (store.get(sessionId) === record) store.remove(sessionId, record)
+        await closeOne(record, { kind: 'disposed' }).catch(() => {})
+        throw error
+      }
+    },
+
+    async loadSession(params: LoadSessionRequest) {
+      if (params.mcpServers !== undefined && params.mcpServers !== null && params.mcpServers.length > 0) {
+        throw invalidParams('mcpServers is not supported')
+      }
+      if (params.additionalDirectories !== undefined && params.additionalDirectories !== null && params.additionalDirectories.length > 0) {
+        throw invalidParams('additionalDirectories is not supported')
+      }
+      if (!isAbsolute(params.cwd)) throw invalidParams(`cwd must be an absolute path: ${params.cwd}`)
+      return this.prepareHistoryResume({ sessionId: params.sessionId, cwd: params.cwd, replay: true })
+    },
+
+    async resumeSession(params: ResumeSessionRequest) {
+      if (params.mcpServers !== undefined && params.mcpServers !== null && params.mcpServers.length > 0) {
+        throw invalidParams('mcpServers is not supported')
+      }
+      if (params.additionalDirectories !== undefined && params.additionalDirectories !== null && params.additionalDirectories.length > 0) {
+        throw invalidParams('additionalDirectories is not supported')
+      }
+      if (!isAbsolute(params.cwd)) throw invalidParams(`cwd must be an absolute path: ${params.cwd}`)
+      return this.prepareHistoryResume({ sessionId: params.sessionId, cwd: params.cwd, replay: false })
+    },
+
+    async deleteSession(params: DeleteSessionRequest) {
+      assertOpen()
+      const sessionId = brandSessionId(params.sessionId)
+      const online = store.get(sessionId)
+      let cwd = online?.cwd
+      if (cwd === undefined && query !== undefined) {
+        const header = await persistedHeader(sessionId)
+        cwd = header?.cwd
+      }
+      if (online !== undefined) {
+        store.remove(sessionId, online)
+        await closeOne(online, { kind: 'user' }).catch(() => {})
+      }
+      deletePersisted({ id: sessionId, cwd })
+      return {}
     },
 
     async closeSession(params: CloseSessionRequest): Promise<Record<string, never>> {
@@ -980,4 +1329,82 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     logger.warn(`dsh-acp-interactive: connection-close teardown failed: ${String(error)}`)
   })
   ctx.effect(() => quiesce, 'dsh-acp-interactive.connection')
+
+  // ── elicitation: dsh ask_user_question <-> ACP form ───────────────────────
+  // One active provider per context (user-questions seam). A form is only
+  // attempted when the client declared `clientCapabilities.elicitation.form`;
+  // otherwise the provider rejects immediately so the ask tool reports the
+  // failure to the model instead of hanging the turn (design §6.4).
+  if (userQuestions !== undefined) {
+    const disposer = userQuestions.registerProvider({
+      ask: async (request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer> => {
+        const agent = request.agent
+        const record = agent !== undefined ? store.get(agent.session.id) : undefined
+        if (record === undefined || record.closed || conn === undefined) {
+          throw new Error('no live ACP session for this question')
+        }
+        if (!elicitationFormsEnabled()) {
+          throw new Error('this ACP client does not support elicitation forms; answer the question inline instead')
+        }
+        const signal = request.signal
+        if (signal !== undefined && signal.aborted) throw new Error('question aborted')
+        const properties: Record<string, Record<string, unknown>> = {}
+        const required: string[] = []
+        const messages: string[] = []
+        for (const item of request.questions) {
+          messages.push(item.question)
+          const base = {
+            title: item.question,
+            ...(item.detail !== undefined && item.detail.length > 0 ? { description: item.detail } : {}),
+          }
+          const options = item.options ?? []
+          if (options.length > 0) {
+            const labels = options.map((option) => option.label)
+            properties[item.id] = item.multiSelect === true
+              ? { type: 'array', items: { type: 'string', enum: labels }, ...base }
+              : { type: 'string', enum: labels, ...base }
+            properties[`${item.id}__other`] = { type: 'string', title: 'Other' }
+          } else {
+            properties[item.id] = { type: 'string', ...base }
+            required.push(item.id)
+          }
+        }
+        const callId = askCall.get(record.id)
+        let outcome
+        try {
+          outcome = await conn.createElicitation({
+            mode: 'form',
+            sessionId: record.id,
+            ...(callId !== undefined ? { toolCallId: callId } : {}),
+            message: messages.join(' '),
+            schema: { type: 'object', properties, required },
+          })
+        } finally {
+          askCall.delete(record.id)
+        }
+        if (outcome.action === 'decline') throw new Error('the user declined the question')
+        if (outcome.action === 'cancel') throw new Error('the question was cancelled')
+        let content: Record<string, unknown> = {}
+        if (outcome.action === 'accept' && outcome.content !== undefined && outcome.content !== null) {
+          content = outcome.content as Record<string, unknown>
+        }
+        const answers: AskUserQuestionAnswer['answers'] = []
+        for (const item of request.questions) {
+          const value = content[item.id]
+          const other = content[`${item.id}__other`]
+          const hasOptions = (item.options ?? []).length > 0
+          const selected = value === undefined ? [] : Array.isArray(value) ? value.map(String) : [String(value)]
+          answers.push({
+            id: item.id,
+            selected: hasOptions ? selected : [],
+            ...(typeof other === 'string' && other.length > 0
+              ? { custom: other }
+              : (!hasOptions && typeof value === 'string' && value.length > 0 ? { custom: value } : {})),
+          })
+        }
+        return { answers }
+      },
+    })
+    ctx.effect(() => disposer, 'dsh-acp-interactive.user-questions')
+  }
 }

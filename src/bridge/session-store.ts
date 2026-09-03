@@ -69,6 +69,8 @@ export interface SessionRecord {
   closed: boolean
   /** Reasoning efforts the current model declares (undefined = unknown). */
   supportedEfforts: ReadonlySet<string> | undefined
+  /** Effective write-permission preset name (config option + /permission). */
+  permission: string | undefined
   /** Whole-table plan fold most recently delivered on the wire. */
   sentPlanFold: string | undefined
   /** Whether a plan was ever sent (turn/start clearing only after one). */
@@ -179,6 +181,7 @@ export function makeRecord(
     inflight: undefined,
     closed: false,
     supportedEfforts: undefined,
+    permission: undefined,
     sentPlanFold: undefined,
     everSentPlan: false,
     replaying: false,
