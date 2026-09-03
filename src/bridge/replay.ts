@@ -11,25 +11,7 @@
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { SessionNotification } from '@agentclientprotocol/sdk'
 import { assistantTextChunk, assistantThoughtChunk, foldTodoPlan, toolCallContent } from './updates.js'
-
-/** Coarse ACP tool-kind classification (same table as the live path). */
-function toolKindFor(name: string): 'execute' | 'edit' | 'search' | 'read' | 'delete' | 'think' | 'other' {
-  if (name === 'bash' || name === 'pwsh') return 'execute'
-  if (name === 'write' || name === 'edit' || name === 'str_replace' || name === 'str_replace_editor') return 'edit'
-  if (name === 'read_image' || name === 'read') return 'read'
-  if (name.startsWith('search') || name === 'grep' || name === 'glob' || name === 'fs_search') return 'search'
-  if (name.includes('delete') || name === 'rm') return 'delete'
-  return 'other'
-}
-
-/** Raw tool-argument JSON as displayed input (unparsable stays verbatim). */
-function rawInputOf(argumentsJson: string): unknown {
-  try {
-    return JSON.parse(argumentsJson)
-  } catch {
-    return argumentsJson
-  }
-}
+import { rawInputOf, toolCallTitle, toolKindFor } from './tool-cards.js'
 
 /** First tool-result call id + concatenated visible text of a result message. */
 function toolResultCall(message: { content: readonly unknown[] }): { callId: string; text: string } {
@@ -77,16 +59,19 @@ export function replayUpdatesForEvent(event: SessionEvent): SessionNotification[
       }
       return updates
     }
-    case 'tool/call':
+    case 'tool/call': {
+      const rawInput = rawInputOf(event.data.arguments)
+      const kind = toolKindFor(event.data.name)
       return [{
         sessionUpdate: 'tool_call',
         toolCallId: String(event.data.callId),
-        title: event.data.name,
+        title: toolCallTitle(kind, event.data.name, rawInput),
         name: event.data.name,
-        kind: toolKindFor(event.data.name),
+        kind,
         status: 'pending',
-        rawInput: rawInputOf(event.data.arguments),
+        rawInput,
       }]
+    }
     case 'tool/result': {
       const { callId, text } = toolResultCall(event.data.message)
       if (callId === '') return []

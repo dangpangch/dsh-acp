@@ -55,11 +55,23 @@ describe('replayUpdatesForEvent', () => {
     expect(updates[0]).toMatchObject({
       sessionUpdate: 'tool_call',
       toolCallId: 'call-1',
+      title: 'ls',
       name: 'bash',
       kind: 'execute',
       status: 'pending',
       rawInput: { command: 'ls' },
     })
+  })
+
+  it('carries the concrete command in the execute-card title (bash card body)', () => {
+    const updates = replayUpdatesForEvent(event('tool/call', {
+      turn: 0,
+      step: 0,
+      callId: 'call-9',
+      name: 'bash',
+      arguments: JSON.stringify({ command: 'git status --short' }),
+    }))
+    expect(updates[0]).toMatchObject({ sessionUpdate: 'tool_call', title: 'git status --short', kind: 'execute' })
   })
 
   it('completes tool calls with result text (truncated content), failed on error', () => {

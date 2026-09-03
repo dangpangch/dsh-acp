@@ -84,6 +84,7 @@ import {
 } from './updates.js'
 import { replayPlanFold, replayUpdatesForEvent } from './replay.js'
 import { mergeSlashCatalog, normalizeSkillSlashText, type SlashCatalogEntry, type SlashCommandEntry, type SlashSkillEntry } from './catalog.js'
+import { rawInputOf, toolCallTitle, toolKindFor } from './tool-cards.js'
 import {
   currentEffortFor,
   guardReasoningEffort,
@@ -230,16 +231,6 @@ interface SessionStoreService {
 type AttachmentsService = {
   readonly imageLimits: { readonly mediaTypes: readonly string[] }
   saveImages(inputs: readonly { mediaType: string; data: Uint8Array }[]): Promise<readonly ImageAttachmentRef[]>
-}
-
-/** Coarse ACP tool-kind classification for the generic card icon. */
-function toolKindFor(name: string): 'execute' | 'edit' | 'search' | 'read' | 'delete' | 'think' | 'other' {
-  if (name === 'bash' || name === 'pwsh') return 'execute'
-  if (name === 'write' || name === 'edit' || name === 'str_replace' || name === 'str_replace_editor') return 'edit'
-  if (name === 'read_image' || name === 'read') return 'read'
-  if (name.startsWith('search') || name === 'grep' || name === 'glob' || name === 'fs_search') return 'search'
-  if (name.includes('delete') || name === 'rm') return 'delete'
-  return 'other'
 }
 
 /** The tool call id and visible text of one tool-result message (cards). */
@@ -454,19 +445,14 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
 
   /** Deliver a generic tool card on call and its terminal update on result. */
   const deliverToolCall = (record: SessionRecord, call: { callId: string; name: string; arguments: string }): void => {
-    let rawInput: unknown
-    try {
-      rawInput = JSON.parse(call.arguments)
-    } catch {
-      rawInput = call.arguments
-    }
+    const rawInput = rawInputOf(call.arguments)
     const kind = toolKindFor(call.name)
     serialize(record, async () => {
       if (record.closed || record.replaying) return
       await notify(sessionNotification(record.id, {
         sessionUpdate: 'tool_call',
         toolCallId: call.callId,
-        title: call.name,
+        title: toolCallTitle(kind, call.name, rawInput),
         name: call.name,
         kind,
         status: 'pending',
