@@ -1,0 +1,45 @@
+# dsh-acp-interactive bundle patch: the interactive ACP (Agent Client
+# Protocol) v1 surface for the DeepSeek Harness, applied as ONE insert over a
+# profile rooted on @deepseek-ai/dsh-base (which owns llm/session/agents/
+# sandbox/tools/commands/persistence rows...). The bridge itself is exported by
+# this package's main entry (lib/plugin.js), so the row name is the package
+# name; the loader resolves it from the profile's module graph.
+#
+# Patch semantics: a top-level {id, config} op REPLACES that row's whole
+# config; `- insert:` adds new rows. See package README.zh.md for the full
+# contract, and the zed-dsh design docs for the mapping rationale.
+
+# ── persona: ACP sessions get their own concise coding persona ─────────────
+- id: system-prompt
+  config:
+    persona: >-
+      You are a coding assistant powered by the {{model}} model. Your working
+      directory is {{cwd}}. Your bash tool runs under a file sandbox — a
+      `[sandbox: file access denied …]` result is policy, not a command bug.
+      Verify your work by running the code or tests. Keep answers brief and
+      factual.
+
+# No HMR under an ACP stdio session: a reload would tear the wire down.
+- id: hmr
+  disabled: true
+
+- insert:
+    # Per-session agent-preset roster. `default` names the preset every ACP
+    # agent is composed from (plain native-tool coding agent). The dsh CLI
+    # profile boot appends the shipped preset root (and the home user root is
+    # derived) onto this row automatically; a standalone dev boot must supply
+    # its own roots (see src/dev-bin.ts).
+    - id: agent-presets
+      name: '@deepseek-ai/dsh-agent-presets'
+      config:
+        default: standard
+
+    # The ACP bridge plugin: opens the AgentSideConnection over stdin/stdout
+    # once the tree settles and drives ctx.agents sessions. provider/model are
+    # the shipped route defaults; clients may switch per session through
+    # configOptions.
+    - id: dsh-acp-interactive
+      name: 'dsh-acp-interactive'
+      config:
+        provider: deepseek-official
+        model: deepseek-v4-flash

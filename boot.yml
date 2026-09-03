@@ -1,0 +1,5 @@
+# dsh-acp-interactive — root config anchor (empty entries). The whole
+# composition is patch layers: @deepseek-ai/dsh-base, this package's
+# cordis.patch.yml, then any --patch overlays. The file exists only because the
+# include loader needs a real root to anchor baseUrl at the package directory.
+[]
