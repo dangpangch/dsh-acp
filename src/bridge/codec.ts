@@ -1,8 +1,6 @@
-// Adapted from the zed-dsh project (https://github.com/dangpangch/zed-dsh, MIT) —
-// same-author port into the dsh-acp-interactive bundle. See package LICENSE.
-// Pure turn-ending -> ACP stopReason mapping (design.zh.md §6.2, protocol-map.md
-// §3, acceptance.md §4 `codec-stop-reasons`). Kept dependency-free so the whole
-// table is unit-testable without a harness or protocol SDK.
+// Pure turn-ending -> ACP stopReason mapping (docs/design.zh.md §3.3). Kept
+// dependency-free so the whole table is unit-testable without a harness or
+// protocol SDK.
 //
 // The rc.2 harness closes a turn with a `reason.kind` from this closed
 // vocabulary (dsh-session TurnEndReasonMap); ACP v1 (sdk 1.4.0 schema) closes a

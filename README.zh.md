@@ -125,11 +125,11 @@ node scripts/history-probe.mjs   # 会话历史端到端（隔离 DSH_HOME）
 
 布局：`src/bridge/index.ts`（插件入口）、`catalog.ts`（斜杠目录）、
 `replay.ts`（历史 → ACP 帧）、`tool-cards.ts`（卡片标题/分类）、
-`{codec,updates,content,config-options,session-store}.ts`（移植自 MIT 工程
-`dangpangch/zed-dsh`）、`src/dev-bin.ts`（隔离 dev/test boot）、
+`{codec,updates,content,config-options,session-store}.ts`（wire builder / 决策表）、
+`src/dev-bin.ts`（隔离 dev/test boot）、
 `cordis.patch.yml`（bundle 补丁）。
 
 ## 文档与许可
 
 - 技术文档（唯一，中文）：`docs/design.zh.md`
-- MIT；代码移植自同一作者 MIT 工程 `dangpangch/zed-dsh`（文件头标注）。
+- MIT

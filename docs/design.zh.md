@@ -15,9 +15,6 @@ dsh-acp-interactive **本质上是一个 dsh plugin**（dsh bundle 包，声明
 - 把 DeepSeek Harness 作为 **Zed Editor 的自定义 agent server extension**
   提供（交互式 ACP v1 服务器，经 `dsh plugin --profile acp add <url|dir>`
   装入 profile、`dsh --profile acp` 启动，走 stdio + JSON-RPC）。
-
-Bridge 模块移植自同一作者 MIT 工程 `dangpangch/zed-dsh`（文件头标注）。
-
 ## 2. 组成与进程模型
 
 ### 2.1 bundle 组合
@@ -216,7 +213,7 @@ src/bridge/index.ts     插件入口：AgentSideConnection + 会话生命周期 
 src/bridge/catalog.ts   斜杠目录合并（命令平面 + user-invocable skills；纯函数）
 src/bridge/replay.ts    持久历史 → ACP 回放帧（纯函数）
 src/bridge/tool-cards.ts 卡片分类/rawInput/标题（execute 标题=命令；纯函数）
-src/bridge/{codec,updates,content,config-options,session-store}.ts  移植自 zed-dsh(MIT)
+src/bridge/{codec,updates,content,config-options,session-store}.ts  纯映射/builder 模块（§3）
 src/dev-bin.ts          独立 dev/test boot（dsh-base + 本包 patch + presets fixture）
 cordis.patch.yml        bundle 补丁（§2.1）
 scripts/history-probe.mjs  会话历史端到端探针

@@ -1,11 +1,8 @@
-// Adapted from the zed-dsh project (https://github.com/dangpangch/zed-dsh, MIT) —
-// same-author port into the dsh-acp-interactive bundle. See package LICENSE.
 // Per-session bridge records: the live registry plus teardown/quiescence
-// primitives (design.zh.md §6.1, protocol-map.md §2). Teardown invariant:
-// stop new work -> cancel admission/agent -> drain ordered updates -> dispose
-// the agent -> flush persistence, scoped to the addressed session only. The
-// registry and inflight state transitions are unit-testable without a harness
-// (acceptance.md §4 `session-list-load`, `teardown-quiescence`).
+// primitives (docs/design.zh.md §2.2). Teardown invariant: stop new work ->
+// cancel admission/agent -> drain ordered updates -> dispose the agent ->
+// flush persistence, scoped to the addressed session only. The registry and
+// inflight state transitions are unit-testable without a harness.
 import type { Agent, AgentHandle, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import type { AgentCancelCause, SessionId } from '@deepseek-ai/dsh-session'
 import type { AcpStopReason } from './codec.js'

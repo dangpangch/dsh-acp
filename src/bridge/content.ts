@@ -1,11 +1,9 @@
-// Adapted from the zed-dsh project (https://github.com/dangpangch/zed-dsh, MIT) —
-// same-author port into the dsh-acp-interactive bundle. See package LICENSE.
 // Prompt content admission and projection: text / resource_link / raster
-// images -> durable dsh messages (design.zh.md §6.1 session/prompt, §6.5 识图,
-// protocol-map.md §4). Validation is pure and unit-testable; durable image
-// persistence delegates to the shared attachment store (dsh-attachment) so the
-// batch limits, media-type checks, normalization, and ordering run in one
-// place. A rejected batch never persists any object.
+// images -> durable dsh messages (docs/design.zh.md §3.2). Validation is pure
+// and unit-testable; durable image persistence delegates to the shared
+// attachment store (dsh-attachment) so the batch limits, media-type checks,
+// normalization, and ordering run in one place. A rejected batch never
+// persists any object.
 import type { ContentBlock as AcpContentBlock } from '@agentclientprotocol/sdk'
 import type { AttachmentStore, ImageAttachmentRef, SaveImageAttachment } from '@deepseek-ai/dsh-attachment'
 import { isImageAdmissionError } from '@deepseek-ai/dsh-attachment'

@@ -1,12 +1,9 @@
-// Adapted from the zed-dsh project (https://github.com/dangpangch/zed-dsh, MIT) —
-// same-author port into the dsh-acp-interactive bundle. See package LICENSE.
 // Semantic update serialization: committed assistant text / tool lifecycle /
 // plan / usage facts — never raw provider deltas or private dsh presentation
-// data (design.zh.md §6.2, protocol-map.md §3). Wire variant names follow the
-// v1 `SessionUpdate` union exactly (sdk 1.4.0 schema/types.gen.d.ts); delivery
-// ordering (per-session serial chain) is the bridge's concern, these are pure
-// builders and folds, unit-testable offline (acceptance.md §4 `usage-update`,
-// `plan-update`).
+// data (docs/design.zh.md §3). Wire variant names follow the v1 `SessionUpdate`
+// union exactly (sdk 1.4.0 schema/types.gen.d.ts); delivery ordering
+// (per-session serial chain) is the bridge's concern, these are pure builders
+// and folds, unit-testable offline.
 import type { SessionNotification } from '@agentclientprotocol/sdk'
 import type { SessionEvent, TodoItem } from '@deepseek-ai/dsh-session'
 

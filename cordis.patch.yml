@@ -6,8 +6,7 @@
 # name; the loader resolves it from the profile's module graph.
 #
 # Patch semantics: a top-level {id, config} op REPLACES that row's whole
-# config; `- insert:` adds new rows. See package README.zh.md for the full
-# contract, and the zed-dsh design docs for the mapping rationale.
+# config; `- insert:` adds new rows. Mapping rationale: docs/design.zh.md.
 
 # ── persona: ACP sessions get their own concise coding persona ─────────────
 - id: system-prompt

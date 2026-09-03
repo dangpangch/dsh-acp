@@ -1,10 +1,7 @@
-// Adapted from the zed-dsh project (https://github.com/dangpangch/zed-dsh, MIT) —
-// same-author port into the dsh-acp-interactive bundle. See package LICENSE.
 // Pure builders for the ACP session configuration selectors that Zed renders
-// as dropdowns (`configOptions` on session/new | load, §6.3 / protocol-map §6).
-// Everything here is dependency-free and unit-testable (acceptance.md §4
-// `config-options`, `thinking-modes`); the bridge module feeds service data in
-// and these return the wire shapes.
+// as dropdowns (`configOptions` on session/new | load; docs/design.zh.md §3.5).
+// Everything here is dependency-free and unit-testable; the bridge module
+// feeds service data in and these return the wire shapes.
 //
 // Zed quirks this module encodes (design appendix A / B): Zed ignores
 // `models`/`modes` whenever `configOptions` is present, so every user-visible

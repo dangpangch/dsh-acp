@@ -16,10 +16,8 @@
 // same loading path the dsh Web "/" menu uses. Commands keep their plain
 // names, and the announcement is partitioned commands-first then skills so the
 // flat Zed popup reads as two blocks. Skill descriptions stay plain (the
-// `skill:` prefix already marks them in the list).
-//
-// Adapted from the zed-dsh project (https://github.com/dangpangch/zed-dsh, MIT)
-// — same-author port; design.zh.md §6.6 and protocol-map.md §1 still apply.
+// `skill:` prefix already marks them in the list). Naming/loading rationale
+// documented in docs/design.zh.md §3.5.
 
 /** One dsh command-plane entry as ctx.commands.list() reports it. */
 export interface SlashCommandEntry {

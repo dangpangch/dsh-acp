@@ -5,9 +5,7 @@
 // quiescent teardown per session and on disconnect/dispose. stdout stays
 // JSON-RPC-only — every diagnostic rides ctx.logger (stderr).
 //
-// Adapted from the zed-dsh project (https://github.com/dangpangch/zed-dsh, MIT)
-// — same-author port; mapping decisions in zed-dsh docs/design.zh.md §6 and
-// docs/protocol-map.md still apply. Mapping highlights:
+// Mapping highlights (docs/design.zh.md §3):
 //   session/new     -> ctx.agents.create (cwd + selection install), durable flush
 //   session/prompt  -> single-flight text/image admission -> agent.followup
 //                      -> committed assistant text streams as agent_message_chunk

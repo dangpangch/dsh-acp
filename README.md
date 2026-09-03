@@ -136,11 +136,11 @@ node scripts/history-probe.mjs   # session history end-to-end (isolated DSH_HOME
 
 Layout: `src/bridge/index.ts` (plugin entry), `catalog.ts` (slash catalog),
 `replay.ts` (history → ACP frames), `tool-cards.ts` (card titles/kinds),
-`{codec,updates,content,config-options,session-store}.ts` (ported from the
-MIT-licensed `dangpangch/zed-dsh`), `src/dev-bin.ts` (isolated dev/test boot),
+`{codec,updates,content,config-options,session-store}.ts` (wire builders /
+decision tables), `src/dev-bin.ts` (isolated dev/test boot),
 `cordis.patch.yml` (bundle patch).
 
 ## Docs & license
 
 - Technical design document (Chinese): `docs/design.zh.md`
-- MIT — adapted from the same author's `dangpangch/zed-dsh` (MIT).
+- MIT
