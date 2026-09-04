@@ -5,7 +5,11 @@
 // (per-session serial chain) is the bridge's concern, these are pure builders
 // and folds, unit-testable offline.
 import type { SessionNotification } from '@agentclientprotocol/sdk'
-import type { SessionEvent, TodoItem } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
+// TodoItem and the `todo/write` SessionEventMap entry are owned by the todo
+// tool package since dsh 0.1.2 (DSH-0.1.2-A1/R-11); importing the types pulls
+// the official module augmentation into the program.
+import type { TodoItem } from '@deepseek-ai/dsh-tool-todo'
 import { isAbsolute, resolve } from 'node:path'
 
 export type SessionIdLike = string

@@ -1,7 +1,8 @@
 // updates: semantic update wire shapes + replay folds (design.zh.md §3.3/§3.4
 // stream/plan/usage rules; §6.2 offline tests).
 import { describe, expect, it } from 'vitest'
-import type { SessionEvent, SessionEventMap, TodoItem } from '@deepseek-ai/dsh-session'
+import type { SessionEvent, SessionEventMap } from '@deepseek-ai/dsh-session'
+import type { TodoItem } from '@deepseek-ai/dsh-tool-todo'
 import {
   assistantTextChunk,
   assistantThoughtChunk,

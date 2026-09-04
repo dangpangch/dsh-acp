@@ -12,11 +12,11 @@ Agent Panel 里使用 DeepSeek Harness 的 agent：建/关线程、文本与思�
 
 ## 前提
 
-- dsh CLI（验证于 `0.1.1-rc.2`）——先全局安装：
+- dsh CLI（验证于 `0.1.2-rc.1`）——先全局安装：
 
   ```bash
   npm install -g @deepseek-ai/dsh
-  dsh --version   # → 0.1.1-rc.2
+  dsh --version   # → 0.1.2-rc.1
   ```
 
 - pnpm（`dsh plugin` 转发给 pnpm）

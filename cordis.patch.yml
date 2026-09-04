@@ -33,6 +33,12 @@
       config:
         default: standard
 
+    # Subagent model selection needs this Host-scope seat when the shipped
+    # `standard` preset mounts on a base-only profile (the official web-app
+    # bundle carries it; dsh-base does not).
+    - id: subagent-model-selection-settings
+      name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
+
     # The ACP bridge plugin: opens the AgentSideConnection over stdin/stdout
     # once the tree settles and drives ctx.agents sessions. provider/model are
     # the shipped route defaults; clients may switch per session through

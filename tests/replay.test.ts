@@ -5,7 +5,7 @@
 // reproduce (with follow-along locations and structured diffs), todo history
 // folds to one final plan, raw deltas never leak.
 import { describe, expect, it } from 'vitest'
-import type { SessionEvent, SessionEventMap } from '@deepseek-ai/dsh-session'
+import { SessionSeq, type SessionEvent, type SessionEventMap } from '@deepseek-ai/dsh-session'
 import { foldTodoPlan, planUpdate } from '../src/bridge/updates.js'
 import { replayUpdatesForEvent } from '../src/bridge/replay.js'
 import { rawInputOf } from '../src/bridge/tool-cards.js'
@@ -57,7 +57,7 @@ describe('replayUpdatesForEvent', () => {
       content: [{ type: 'text', text: 'fix the bug' }],
       source: { kind: 'user' },
     }) as SessionEvent & { seq: number }
-    userEvent.seq = 7
+    userEvent.seq = SessionSeq(7)
     const updates = replayUpdatesForEvent(userEvent, ctx)
     expect(updates).toEqual([
       { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'fix the bug' }, messageId: '7' },
@@ -72,7 +72,7 @@ describe('replayUpdatesForEvent', () => {
       ],
       source: { kind: 'user' },
     }) as SessionEvent & { seq: number }
-    userEvent.seq = 3
+    userEvent.seq = SessionSeq(3)
     const updates = replayUpdatesForEvent(userEvent, ctx)
     expect(updates).toEqual([
       { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'look at this' }, messageId: '3' },

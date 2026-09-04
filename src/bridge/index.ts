@@ -130,7 +130,7 @@ type WireConfigOptions = NonNullable<NewSessionResponse['configOptions']>
 
 /** Agent-presets roster seam (default-preset join per session, best effort). */
 interface AgentPresetsSeam {
-  resolve(): { readonly id: string } | undefined
+  resolve(id?: string): Promise<{ readonly id: string }> | { readonly id: string }
   mount(ctx: unknown, id: string): Promise<unknown>
 }
 
@@ -159,9 +159,9 @@ interface PermissionPresetsSeam {
   set(session: Session, name: string): void
 }
 
-/** Human question UI seam for elicitation forms. */
+/** Human question UI seam for elicitation forms (either generation). */
 interface UserQuestionsSeam {
-  registerProvider(provider: { ask(request: unknown): Promise<{ answers: { id: string; selected: string[]; custom?: string }[] }> }): () => void
+  ask?(request: unknown): Promise<{ answers: { id: string; selected: string[]; custom?: string }[] }>
 }
 
 /** The projection read face the bridge uses for usage_update (token-meter unit). */
@@ -962,9 +962,9 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       selection.current = { provider: defaults.provider, model: defaults.model }
     }
     let presetId = agentPreset
-    if (presetId === undefined) {
+    if (presetId === undefined && presets !== undefined) {
       try {
-        presetId = presets?.resolve()?.id
+        presetId = (await presets.resolve())?.id
       } catch (error: unknown) {
         logger.warn(`dsh-acp-interactive: default agent preset unavailable: ${errorChain(error)}`)
       }
@@ -1082,10 +1082,12 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       // row; an absent roster or a default that no root supplies must not
       // take the session down — the agent still runs on the global layer.
       let presetId: string | undefined
-      try {
-        presetId = presets?.resolve()?.id
-      } catch (error: unknown) {
-        logger.warn(`dsh-acp-interactive: default agent preset unavailable: ${errorChain(error)}`)
+      if (presets !== undefined) {
+        try {
+          presetId = (await presets.resolve())?.id
+        } catch (error: unknown) {
+          logger.warn(`dsh-acp-interactive: default agent preset unavailable: ${errorChain(error)}`)
+        }
       }
       let handle
       try {
@@ -1406,80 +1408,106 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   ctx.effect(() => quiesce, 'dsh-acp-interactive.connection')
 
   // ── elicitation: dsh ask_user_question <-> ACP form ───────────────────────
-  // One active provider per context (user-questions seam). A form is only
+  // One active answerer per context (user-questions seam). A form is only
   // attempted when the client declared `clientCapabilities.elicitation.form`;
-  // otherwise the provider rejects immediately so the ask tool reports the
+  // otherwise the answerer rejects immediately so the ask tool reports the
   // failure to the model instead of hanging the turn (design §6.4).
+  //
+  // Two seam generations ship in the wild: dsh 0.1.1 exposes a single active
+  // provider through `registerProvider`; 0.1.2 removed it in favor of the
+  // Agent-scoped `user-questions/request` waterfall (an untagged root listener
+  // is admitted for every agent-scoped dispatch, so one bridge listener covers
+  // all sessions and keys by `request.agent` itself). Prefer the waterfall —
+  // it is the forward contract — and fall back to the provider when present so
+  // an older host keeps working unchanged.
+  const askViaForm = async (request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer> => {
+    const agent = request.agent
+    const record = agent !== undefined ? store.get(agent.session.id) : undefined
+    if (record === undefined || record.closed || conn === undefined) {
+      throw new Error('no live ACP session for this question')
+    }
+    if (!elicitationFormsEnabled()) {
+      throw new Error('this ACP client does not support elicitation forms; answer the question inline instead')
+    }
+    const signal = request.signal
+    if (signal !== undefined && signal.aborted) throw new Error('question aborted')
+    const properties: Record<string, Record<string, unknown>> = {}
+    const required: string[] = []
+    const messages: string[] = []
+    for (const item of request.questions) {
+      messages.push(item.question)
+      const base = {
+        title: item.question,
+        ...(item.detail !== undefined && item.detail.length > 0 ? { description: item.detail } : {}),
+      }
+      const options = item.options ?? []
+      if (options.length > 0) {
+        const labels = options.map((option) => option.label)
+        properties[item.id] = item.multiSelect === true
+          ? { type: 'array', items: { type: 'string', enum: labels }, ...base }
+          : { type: 'string', enum: labels, ...base }
+        properties[`${item.id}__other`] = { type: 'string', title: 'Other' }
+      } else {
+        properties[item.id] = { type: 'string', ...base }
+        required.push(item.id)
+      }
+    }
+    const callId = askCall.get(record.id)
+    let outcome
+    try {
+      outcome = await conn.createElicitation({
+        mode: 'form',
+        sessionId: record.id,
+        ...(callId !== undefined ? { toolCallId: callId } : {}),
+        message: messages.join(' '),
+        schema: { type: 'object', properties, required },
+      })
+    } finally {
+      askCall.delete(record.id)
+    }
+    if (outcome.action === 'decline') throw new Error('the user declined the question')
+    if (outcome.action === 'cancel') throw new Error('the question was cancelled')
+    let content: Record<string, unknown> = {}
+    if (outcome.action === 'accept' && outcome.content !== undefined && outcome.content !== null) {
+      content = outcome.content as Record<string, unknown>
+    }
+    const answers: AskUserQuestionAnswer['answers'] = []
+    for (const item of request.questions) {
+      const value = content[item.id]
+      const other = content[`${item.id}__other`]
+      const hasOptions = (item.options ?? []).length > 0
+      const selected = value === undefined ? [] : Array.isArray(value) ? value.map(String) : [String(value)]
+      answers.push({
+        id: item.id,
+        selected: hasOptions ? selected : [],
+        ...(typeof other === 'string' && other.length > 0
+          ? { custom: other }
+          : (!hasOptions && typeof value === 'string' && value.length > 0 ? { custom: value } : {})),
+      })
+    }
+    return { answers }
+  }
+
   if (userQuestions !== undefined) {
-    const disposer = userQuestions.registerProvider({
-      ask: async (request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer> => {
+    type LegacyProvider = { ask(request: unknown): Promise<AskUserQuestionAnswer> }
+    const legacy = userQuestions as { registerProvider?: (provider: LegacyProvider) => () => void }
+    const legacyRegister = legacy.registerProvider
+    if (typeof legacyRegister === 'function') {
+      const disposer = legacyRegister.call(userQuestions, { ask: askViaForm })
+      ctx.effect(() => disposer, 'dsh-acp-interactive.user-questions')
+    } else {
+      // Waterfall generation: claim our own sessions' questions and delegate
+      // everything else (`next()`), so a foreign asker still reaches any local
+      // answerer composed elsewhere in the host.
+      ctx.on('user-questions/request' as never, ((
+        request: AskUserQuestionRequest,
+        next: () => Promise<AskUserQuestionAnswer>,
+      ) => {
         const agent = request.agent
         const record = agent !== undefined ? store.get(agent.session.id) : undefined
-        if (record === undefined || record.closed || conn === undefined) {
-          throw new Error('no live ACP session for this question')
-        }
-        if (!elicitationFormsEnabled()) {
-          throw new Error('this ACP client does not support elicitation forms; answer the question inline instead')
-        }
-        const signal = request.signal
-        if (signal !== undefined && signal.aborted) throw new Error('question aborted')
-        const properties: Record<string, Record<string, unknown>> = {}
-        const required: string[] = []
-        const messages: string[] = []
-        for (const item of request.questions) {
-          messages.push(item.question)
-          const base = {
-            title: item.question,
-            ...(item.detail !== undefined && item.detail.length > 0 ? { description: item.detail } : {}),
-          }
-          const options = item.options ?? []
-          if (options.length > 0) {
-            const labels = options.map((option) => option.label)
-            properties[item.id] = item.multiSelect === true
-              ? { type: 'array', items: { type: 'string', enum: labels }, ...base }
-              : { type: 'string', enum: labels, ...base }
-            properties[`${item.id}__other`] = { type: 'string', title: 'Other' }
-          } else {
-            properties[item.id] = { type: 'string', ...base }
-            required.push(item.id)
-          }
-        }
-        const callId = askCall.get(record.id)
-        let outcome
-        try {
-          outcome = await conn.createElicitation({
-            mode: 'form',
-            sessionId: record.id,
-            ...(callId !== undefined ? { toolCallId: callId } : {}),
-            message: messages.join(' '),
-            schema: { type: 'object', properties, required },
-          })
-        } finally {
-          askCall.delete(record.id)
-        }
-        if (outcome.action === 'decline') throw new Error('the user declined the question')
-        if (outcome.action === 'cancel') throw new Error('the question was cancelled')
-        let content: Record<string, unknown> = {}
-        if (outcome.action === 'accept' && outcome.content !== undefined && outcome.content !== null) {
-          content = outcome.content as Record<string, unknown>
-        }
-        const answers: AskUserQuestionAnswer['answers'] = []
-        for (const item of request.questions) {
-          const value = content[item.id]
-          const other = content[`${item.id}__other`]
-          const hasOptions = (item.options ?? []).length > 0
-          const selected = value === undefined ? [] : Array.isArray(value) ? value.map(String) : [String(value)]
-          answers.push({
-            id: item.id,
-            selected: hasOptions ? selected : [],
-            ...(typeof other === 'string' && other.length > 0
-              ? { custom: other }
-              : (!hasOptions && typeof value === 'string' && value.length > 0 ? { custom: value } : {})),
-          })
-        }
-        return { answers }
-      },
-    })
-    ctx.effect(() => disposer, 'dsh-acp-interactive.user-questions')
+        if (record === undefined) return next()
+        return askViaForm(request)
+      }) as never)
+    }
   }
 }

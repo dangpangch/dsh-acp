@@ -14,11 +14,11 @@ inside the dsh sandbox with dsh's own model route.
 
 ## Requirements
 
-- dsh CLI (tested on `0.1.1-rc.2`) — install globally first:
+- dsh CLI (tested on `0.1.2-rc.1`) — install globally first:
 
   ```bash
   npm install -g @deepseek-ai/dsh
-  dsh --version   # → 0.1.1-rc.2
+  dsh --version   # → 0.1.2-rc.1
   ```
 
 - pnpm (the `dsh plugin` command delegates to pnpm)
