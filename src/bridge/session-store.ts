@@ -78,33 +78,17 @@ export interface SessionRecord {
   replaying: boolean
 }
 
-/** Registry of every live bridge session, keyed by shared agent/session id. */
-export class SessionStore {
-  private readonly records = new Map<SessionId, SessionRecord>()
+/**
+ * Live-session registry keyed by shared agent/session id. A plain Map plus
+ * one identity-guarded remove helper: only the exact record instance an
+ * owner registered may deregister itself (an impostor with the same id — a
+ * superseded create racing a stale teardown — never removes the live entry).
+ */
+export type SessionRegistry = Map<SessionId, SessionRecord>
 
-  has(id: SessionId): boolean {
-    return this.records.has(id)
-  }
-
-  get(id: SessionId): SessionRecord | undefined {
-    return this.records.get(id)
-  }
-
-  add(record: SessionRecord): void {
-    this.records.set(record.id, record)
-  }
-
-  remove(id: SessionId, record: SessionRecord): void {
-    if (this.records.get(id) === record) this.records.delete(id)
-  }
-
-  list(): SessionRecord[] {
-    return [...this.records.values()]
-  }
-
-  get size(): number {
-    return this.records.size
-  }
+/** Deregister `record` only when it is still the registered instance. */
+export function removeRecord(store: SessionRegistry, record: SessionRecord): void {
+  if (store.get(record.id) === record) store.delete(record.id)
 }
 
 /** Allocate a fresh single-flight prompt slot (factory keeps transitions honest). */

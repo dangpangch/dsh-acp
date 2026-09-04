@@ -1,17 +1,39 @@
 // replay: durable session history -> wire update conversion for session/load
-// (acceptance.md §4 `session-list-load`; design §6.1/6.2). Pure mapping tests:
-// committed assistant content streams whole, tool cards reproduce, todo
-// history folds to one final plan, raw deltas never leak.
+// (design.zh.md §4 `session-list-load`; design §6.2). Pure mapping tests:
+// committed assistant content streams whole, tool cards reproduce (with
+// follow-along locations and structured diffs), todo history folds to one
+// final plan, raw deltas never leak.
 import { describe, expect, it } from 'vitest'
 import type { SessionEvent, SessionEventMap } from '@deepseek-ai/dsh-session'
-import { replayPlanFold, replayUpdatesForEvent } from '../src/bridge/replay.js'
+import { foldTodoPlan, planUpdate } from '../src/bridge/updates.js'
+import { replayUpdatesForEvent } from '../src/bridge/replay.js'
+import { rawInputOf } from '../src/bridge/tool-cards.js'
 
 /** Minimal session event fixture (payloads are intentionally untyped shapes). */
 function event(type: keyof SessionEventMap, data: unknown): SessionEvent {
   return { type, seq: 0, time: 0, data } as unknown as SessionEvent
 }
 
+/** Replay context: call-id pairing built as the log walks, like the bridge. */
+class Calls {
+  private readonly map = new Map<string, { name: string; rawInput: unknown }>()
+  add(callEvent: SessionEvent): void {
+    if (callEvent.type !== 'tool/call') return
+    const data = callEvent.data as { callId: unknown; name: string; arguments: string }
+    this.map.set(String(data.callId), { name: data.name, rawInput: rawInputOf(data.arguments) })
+  }
+  readonly view = { cwd: '/ws', calls: this.map }
+}
+
+function replay(events: readonly SessionEvent[]): { calls: Calls; updatesFor(callEvent: SessionEvent): ReturnType<typeof replayUpdatesForEvent> } {
+  const calls = new Calls()
+  for (const one of events) calls.add(one)
+  return { calls, updatesFor: (callEvent: SessionEvent) => replayUpdatesForEvent(callEvent, calls.view) }
+}
+
 describe('replayUpdatesForEvent', () => {
+  const ctx = { cwd: '/ws', calls: new Map<string, { name: string; rawInput: unknown }>() }
+
   it('streams committed assistant text and reasoning blocks whole', () => {
     const updates = replayUpdatesForEvent(event('assistant/message', {
       turn: 0,
@@ -22,7 +44,7 @@ describe('replayUpdatesForEvent', () => {
           { type: 'reasoning', text: 'thinking...' },
         ],
       },
-    }))
+    }), ctx)
     expect(updates).toEqual([
       { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hello' } },
       { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'thinking...' } },
@@ -38,7 +60,7 @@ describe('replayUpdatesForEvent', () => {
           { type: 'image', image: { name: 'shot.png', mediaType: 'image/png' } },
         ],
       },
-    }))
+    }), ctx)
     expect(updates).toEqual([
       { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '[image: shot.png]' } },
     ])
@@ -51,7 +73,7 @@ describe('replayUpdatesForEvent', () => {
       callId: 'call-1',
       name: 'bash',
       arguments: JSON.stringify({ command: 'ls' }),
-    }))
+    }), ctx)
     expect(updates[0]).toMatchObject({
       sessionUpdate: 'tool_call',
       toolCallId: 'call-1',
@@ -70,12 +92,33 @@ describe('replayUpdatesForEvent', () => {
       callId: 'call-9',
       name: 'bash',
       arguments: JSON.stringify({ command: 'git status --short' }),
-    }))
+    }), ctx)
     expect(updates[0]).toMatchObject({ sessionUpdate: 'tool_call', title: 'git status --short', kind: 'execute' })
   })
 
+  it('follows along with an absolute location for file tools (read window line)', () => {
+    const updates = replayUpdatesForEvent(event('tool/call', {
+      turn: 0,
+      step: 0,
+      callId: 'call-2',
+      name: 'read',
+      arguments: JSON.stringify({ file_path: 'src/a.ts', offset: 4, limit: 10 }),
+    }), { cwd: '/ws', calls: new Map() })
+    expect(updates[0]).toMatchObject({
+      kind: 'read',
+      locations: [{ path: '/ws/src/a.ts', line: 4 }],
+    })
+  })
+
   it('completes tool calls with result text (truncated content), failed on error', () => {
-    const updates = replayUpdatesForEvent(event('tool/result', {
+    const { updatesFor } = replay([event('tool/call', {
+      turn: 0,
+      step: 0,
+      callId: 'call-1',
+      name: 'bash',
+      arguments: JSON.stringify({ command: 'ls' }),
+    })])
+    const updates = updatesFor(event('tool/result', {
       turn: 0,
       step: 0,
       message: {
@@ -90,7 +133,7 @@ describe('replayUpdatesForEvent', () => {
       status: 'completed',
       content: [{ type: 'content', content: { type: 'text', text: 'result' } }],
     })
-    const failed = replayUpdatesForEvent(event('tool/result', {
+    const failed = updatesFor(event('tool/result', {
       turn: 0,
       step: 0,
       message: { content: [{ type: 'tool-result', toolCallId: 'call-2', content: [] }] },
@@ -99,29 +142,76 @@ describe('replayUpdatesForEvent', () => {
     expect(failed[0]).toMatchObject({ sessionUpdate: 'tool_call_update', toolCallId: 'call-2', status: 'failed' })
   })
 
-  it('emits nothing for non-visual events (turn boundaries, deltas, usage)', () => {
-    expect(replayUpdatesForEvent(event('turn/start', { turn: 0 }))).toEqual([])
-    expect(replayUpdatesForEvent(event('turn/end', { turn: 0, reason: { kind: 'completed' } }))).toEqual([])
-    expect(replayUpdatesForEvent(event('todo/write', { todos: [] }))).toEqual([])
+  it('renders a structured diff card from the persisted result meta (edit hunks)', () => {
+    const callEvent = event('tool/call', {
+      turn: 0,
+      step: 0,
+      callId: 'call-5',
+      name: 'edit',
+      arguments: JSON.stringify({ file_path: 'src/b.ts', old_string: 'a', new_string: 'b' }),
+    })
+    const { calls, updatesFor } = replay([callEvent])
+    const updates = updatesFor(event('tool/result', {
+      turn: 0,
+      step: 0,
+      message: { content: [{ type: 'tool-result', toolCallId: 'call-5', content: [{ type: 'text', text: 'done' }] }] },
+      meta: { diffs: [{ path: 'src/b.ts', oldText: 'ctx\na\n', newText: 'ctx\nb\n' }] },
+    }))
+    expect(updates[0]).toMatchObject({
+      sessionUpdate: 'tool_call_update',
+      status: 'completed',
+      content: [
+        { type: 'diff', path: '/ws/src/b.ts', oldText: 'ctx\na\n', newText: 'ctx\nb\n' },
+        { type: 'content', content: { type: 'text', text: 'done' } },
+      ],
+    })
+    expect(calls.view.calls.get('call-5')).toEqual({ name: 'edit', rawInput: { file_path: 'src/b.ts', old_string: 'a', new_string: 'b' } })
   })
-})
 
-describe('replayPlanFold', () => {
-  it('folds todo history into one final plan update', () => {
-    const fold = replayPlanFold([
-      event('todo/write', { todos: [{ content: 'a', status: 'pending' }] }),
-      event('todo/write', { todos: [{ content: 'a', status: 'completed' }, { content: 'b', status: 'in_progress' }] }),
-      event('turn/start', { turn: 1 }),
-      event('todo/write', { todos: [{ content: 'c', status: 'pending' }] }),
-    ])
-    expect(fold).toEqual({
-      sessionUpdate: 'plan',
-      entries: [{ content: 'c', priority: 'medium', status: 'pending' }],
+  it('falls back to the arguments-described diff when no meta was persisted (str_replace_editor)', () => {
+    const { updatesFor } = replay([event('tool/call', {
+      turn: 0,
+      step: 0,
+      callId: 'call-6',
+      name: 'str_replace_editor',
+      arguments: JSON.stringify({ command: 'create', path: 'new.ts', file_text: 'hi' }),
+    })])
+    const updates = updatesFor(event('tool/result', {
+      turn: 0,
+      step: 0,
+      message: { content: [{ type: 'tool-result', toolCallId: 'call-6', content: [{ type: 'text', text: 'created' }] }] },
+    }))
+    expect(updates[0]).toMatchObject({
+      content: [
+        { type: 'diff', path: '/ws/new.ts', newText: 'hi' }, // no oldText on a create
+        { type: 'content', content: { type: 'text', text: 'created' } },
+      ],
     })
   })
 
-  it('returns nothing when no plan was ever rendered', () => {
-    expect(replayPlanFold([event('turn/start', { turn: 0 })])).toBeUndefined()
-    expect(replayPlanFold([])).toBeUndefined()
+  it('sends the diff card alone when the tool result carried no visible text', () => {
+    const { updatesFor } = replay([event('tool/call', {
+      turn: 0,
+      step: 0,
+      callId: 'call-7',
+      name: 'edit',
+      arguments: JSON.stringify({ file_path: 'a.ts', old_string: 'x', new_string: 'y' }),
+    })])
+    const updates = updatesFor(event('tool/result', {
+      turn: 0,
+      step: 0,
+      message: { content: [{ type: 'tool-result', toolCallId: 'call-7', content: [] }] },
+      meta: { diffs: [{ path: 'a.ts', oldText: 'x', newText: 'y' }] },
+    }))
+    expect(updates[0]).toMatchObject({
+      sessionUpdate: 'tool_call_update',
+      content: [{ type: 'diff', path: '/ws/a.ts', oldText: 'x', newText: 'y' }],
+    })
+  })
+
+  it('emits nothing for non-visual events (turn boundaries, deltas, usage)', () => {
+    expect(replayUpdatesForEvent(event('turn/start', { turn: 0 }), ctx)).toEqual([])
+    expect(replayUpdatesForEvent(event('turn/end', { turn: 0, reason: { kind: 'completed' } }), ctx)).toEqual([])
+    expect(replayUpdatesForEvent(event('todo/write', { todos: [] }), ctx)).toEqual([])
   })
 })

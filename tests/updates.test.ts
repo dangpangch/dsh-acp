@@ -1,5 +1,5 @@
-// updates: semantic update wire shapes + replay folds (acceptance.md §4
-// `plan-update`/`usage-update`; design.zh.md §6.2).
+// updates: semantic update wire shapes + replay folds (design.zh.md §3.3/§3.4
+// stream/plan/usage rules; §6.2 offline tests).
 import { describe, expect, it } from 'vitest'
 import type { SessionEvent, SessionEventMap, TodoItem } from '@deepseek-ai/dsh-session'
 import {
@@ -12,6 +12,7 @@ import {
   sessionNotification,
   streamTextDelta,
   toolCallContent,
+  toolCallDiffContent,
   usageUpdate,
 } from '../src/bridge/updates.js'
 
@@ -142,5 +143,15 @@ describe('delta streaming (dedupe against committed messages)', () => {
     expect(text.length).toBeLessThan(8_200)
     expect(text.endsWith('… [truncated]')).toBe(true)
     expect(toolCallContent('')).toBeUndefined()
+  })
+
+  it('diff card content absolutizes paths and omits oldText only for creates', () => {
+    expect(toolCallDiffContent([
+      { path: 'src/a.ts', oldText: 'old', newText: 'new' },
+      { path: '/abs/b.ts', oldText: null, newText: 'fresh' },
+    ], '/ws')).toEqual([
+      { type: 'diff', path: '/ws/src/a.ts', oldText: 'old', newText: 'new' },
+      { type: 'diff', path: '/abs/b.ts', newText: 'fresh' },
+    ])
   })
 })

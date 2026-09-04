@@ -1,6 +1,6 @@
 // frame-purity: the served process answers initialize + session/new over a
-// clean ndjson stdout and exits 0 on EOF (acceptance.md §2/§4 `frame-purity`,
-// §4.3 stdout invariant). Component-level: real spawn of the built binary
+// clean ndjson stdout and exits 0 on EOF (design.zh.md §6.1 `frame-purity`,
+// stdout invariant). Component-level: real spawn of the built binary
 // under an isolated DSH_HOME — never touches the real harness home.
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'

@@ -1,5 +1,5 @@
-// content: prompt admission and projection (acceptance.md §4 `image-offload`
-// baseline: media-type/base64 validation; design.zh.md §6.5). No harness.
+// content: prompt admission and projection (design.zh.md §3.2 image
+// admission; §6.2 offline tests). No harness.
 import { describe, expect, it } from 'vitest'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import {
@@ -8,6 +8,7 @@ import {
   contentForPrompt,
   isImageMediaType,
   resourceLinkText,
+  resourceText,
   scanPrompt,
 } from '../src/bridge/content.js'
 
@@ -62,9 +63,13 @@ describe('scanPrompt (wire-order validation)', () => {
     expect(() => scanPrompt([{ ...PNG_BLOCK, mimeType: 'image/svg+xml' }], true)).toThrowError(/mimeType/)
   })
 
-  it('rejects audio and embedded resources', () => {
+  it('rejects audio but degrades embedded resources to plain text (no capability needed)', () => {
     expect(() => scanPrompt([{ type: 'audio', mimeType: 'audio/wav', data: 'AA==' }], false)).toThrowError(/audio/)
-    expect(() => scanPrompt([{ type: 'resource', resource: { uri: 'file:///x', text: 'x' } }], false)).toThrowError(/embedded resource/)
+    // A client that ignored `embeddedContext: false` still gets its context
+    // through as text; the prompt never fails on the resource block.
+    expect(scanPrompt([
+      { type: 'resource', resource: { uri: 'file:///x', text: 'x' } },
+    ], false)).toEqual([])
   })
 })
 
@@ -95,5 +100,25 @@ describe('contentForPrompt (ordered reconstruction)', () => {
 
   it('rejects an all-whitespace text prompt as empty', () => {
     expect(() => contentForPrompt([{ type: 'text', text: '   ' }], [])).toThrowError(/empty prompt/)
+  })
+
+  it('folds an embedded text resource into the adjacent text segment (pi-acp degradation)', () => {
+    const resource = { type: 'resource' as const, resource: { uri: 'file:///notes.md', mimeType: 'text/markdown', text: '# notes' } }
+    const content = contentForPrompt([{ type: 'text', text: 'see' }, resource], [])
+    expect(content).toEqual([{ type: 'text', text: 'see\n[embedded context file:///notes.md (text/markdown)]\n# notes\n' }])
+  })
+
+  it('marks blob and unknown resources instead of dumping decoded bytes', () => {
+    const blob = { type: 'resource' as const, resource: { uri: 'file:///bin.dat', mimeType: 'application/octet-stream', blob: Buffer.from('hi').toString('base64') } }
+    expect(resourceText(blob)).toBe('\n[embedded context file:///bin.dat (application/octet-stream, 2 bytes, not decoded)]\n')
+    // An embedded resource with neither text nor blob keeps its marker (the
+    // runtime narrowing tolerates a hand-shaped payload).
+    const empty = { type: 'resource', resource: { uri: 'file:///x' } } as unknown as Parameters<typeof resourceText>[0]
+    expect(resourceText(empty)).toBe('\n[embedded context file:///x]\n')
+  })
+
+  it('keeps a resource-only prompt non-empty (degraded text still counts)', () => {
+    const resource = { type: 'resource' as const, resource: { uri: 'file:///x', text: 'body' } }
+    expect(contentForPrompt([resource], [])).toEqual([{ type: 'text', text: '\n[embedded context file:///x (text/plain)]\nbody\n' }])
   })
 })

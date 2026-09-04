@@ -1,36 +1,32 @@
-// session-store: bridge session registry + single-flight prompt slot
-// (acceptance.md §4 `session-list-load`/`teardown-quiescence` primitives).
+// session-store: single-flight prompt slot + the registry identity guard
+// (design.zh.md §6.2 `teardown-quiescence` primitives).
 import { describe, expect, it } from 'vitest'
-import { createInflight, SessionStore, type PromptInflight } from '../src/bridge/session-store.js'
+import { createInflight, makeRecord, removeRecord, type PromptInflight, type SessionRecord } from '../src/bridge/session-store.js'
 
-describe('SessionStore registry', () => {
-  it('stores, looks up, and removes records by session id', () => {
-    const store = new SessionStore()
-    const record = { id: 'a' } as never
-    store.add(record as never)
-    expect(store.has('a' as never)).toBe(true)
-    expect(store.get('a' as never)).toBe(record)
-    store.remove('a' as never, record as never)
-    expect(store.has('a' as never)).toBe(false)
-    expect(store.size).toBe(0)
+describe('removeRecord identity guard', () => {
+  const recordFor = (id: string): SessionRecord => makeRecord(
+    id as never,
+    '/ws',
+    { agent: {} as never, dispose: () => Promise.resolve() },
+    { current: undefined, assembled: undefined },
+  )
+
+  it('deregisters the exact registered instance by its own id', () => {
+    const store = new Map()
+    const record = recordFor('a')
+    store.set(record.id, record)
+    removeRecord(store, record)
+    expect(store.has('a')).toBe(false)
   })
 
-  it('remove only deletes the exact record instance (no impostor removal)', () => {
-    const store = new SessionStore()
-    const real = { id: 'a' } as never
-    store.add(real as never)
-    store.remove('a' as never, { id: 'a' } as never)
-    expect(store.get('a' as never)).toBe(real)
-  })
-
-  it('lists records in insertion order and size tracks the map', () => {
-    const store = new SessionStore()
-    const first = { id: '1' } as never
-    const second = { id: '2' } as never
-    store.add(first as never)
-    store.add(second as never)
-    expect(store.list().map((r) => (r as { id: string }).id)).toEqual(['1', '2'])
-    expect(store.size).toBe(2)
+  it('never removes a live entry on behalf of an impostor with the same id', () => {
+    const store = new Map()
+    const real = recordFor('a')
+    store.set(real.id, real)
+    // A superseded create racing a stale teardown carries the same id but a
+    // different instance; the live record must survive.
+    removeRecord(store, recordFor('a'))
+    expect(store.get('a')).toBe(real)
   })
 })
 

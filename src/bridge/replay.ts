@@ -6,20 +6,34 @@
 // state. Raw deltas, usage, titles, and private presentation data stay out —
 // mirroring the live-path rules in updates.ts.
 //
-// Pure and dependency-free (dsh-session types + sdk types only) so the whole
-// mapping is unit-testable offline.
+// Tool cards reproduce the live shapes exactly: the follow-along location
+// from the call arguments (no line inference — the file has moved on since
+// the logged call), and the structured diff from the persisted result meta
+// or the call's own arguments. Pure and dependency-free (dsh-session types +
+// sdk types only) so the whole mapping is unit-testable offline.
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { SessionNotification } from '@agentclientprotocol/sdk'
-import { assistantTextChunk, assistantThoughtChunk, foldTodoPlan, planUpdate, toolCallContent } from './updates.js'
-import { rawInputOf, toolCallTitle, toolKindFor, toolResultCall } from './tool-cards.js'
+import { assistantTextChunk, assistantThoughtChunk, foldTodoPlan, planUpdate, toolCallContent, toolCallDiffContent } from './updates.js'
+import { diffForToolCall, rawInputOf, toolCallLocation, toolCallTitle, toolKindFor, toolResultCall } from './tool-cards.js'
+/** Replay context per call id: the pairing a live session keeps in the firehose. */
+interface ReplayCall {
+  name: string
+  rawInput: unknown
+}
 
 /**
  * Map one stored session event to the wire updates a `session/load` replay
  * should send. Assistant committed content streams whole (replay never
  * re-streams raw deltas); image blocks degrade to a bracketed placeholder.
+ * `calls` pairs a `tool/result` with its call (the result event carries only
+ * the call id) and `cwd` absolutizes locations and diff paths — callers walk
+ * the log in order, adding each `tool/call` before its result reads it.
  * Returns an empty array for events with no client-visible face.
  */
-export function replayUpdatesForEvent(event: SessionEvent): SessionNotification['update'][] {
+export function replayUpdatesForEvent(
+  event: SessionEvent,
+  context: { cwd: string; calls: ReadonlyMap<string, ReplayCall> },
+): SessionNotification['update'][] {
   switch (event.type) {
     case 'assistant/message': {
       const updates: SessionNotification['update'][] = []
@@ -45,6 +59,7 @@ export function replayUpdatesForEvent(event: SessionEvent): SessionNotification[
     case 'tool/call': {
       const rawInput = rawInputOf(event.data.arguments)
       const kind = toolKindFor(event.data.name)
+      const location = toolCallLocation(rawInput, context.cwd)
       return [{
         sessionUpdate: 'tool_call',
         toolCallId: String(event.data.callId),
@@ -53,31 +68,27 @@ export function replayUpdatesForEvent(event: SessionEvent): SessionNotification[
         kind,
         status: 'pending',
         rawInput,
+        ...(location !== undefined ? { locations: [location] } : {}),
       }]
     }
     case 'tool/result': {
       const { callId, text } = toolResultCall(event.data.message)
       if (callId === '') return []
       const isError = event.data.error !== undefined
+      const call = context.calls.get(callId)
+      const diffs = diffForToolCall(call?.name ?? '', call?.rawInput, event.data.meta, isError)
+      const textContent = toolCallContent(text)
+      const content = diffs === undefined
+        ? textContent
+        : [...toolCallDiffContent(diffs, context.cwd), ...textContent ?? []]
       return [{
         sessionUpdate: 'tool_call_update',
         toolCallId: callId,
         status: isError ? 'failed' : 'completed',
-        ...(text.length > 0 ? { content: toolCallContent(text) } : {}),
+        ...(content !== undefined ? { content } : {}),
       }]
     }
     default:
       return []
   }
-}
-
-/**
- * The one plan update a replay ends with (todo history folded to its final
- * state), or undefined when the log never rendered a plan — replay never
- * fabricates frames.
- */
-export function replayPlanFold(events: readonly SessionEvent[]): SessionNotification['update'] | undefined {
-  const entries = foldTodoPlan(events)
-  if (entries === undefined || entries.length === 0) return undefined
-  return planUpdate(entries)
 }

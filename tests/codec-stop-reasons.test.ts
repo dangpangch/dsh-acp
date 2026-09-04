@@ -1,39 +1,22 @@
-// codec-stop-reasons: turn-ending -> ACP stop reason mapping
-// (acceptance.md §4 `codec-stop-reasons`; design.zh.md §6.2, protocol-map.md §3).
+// codec-stop-reasons: turn-ending -> ACP stop reason settlement table
+// (design.zh.md §3.3/§6.2).
 import { describe, expect, it } from 'vitest'
 import {
   settledStopReason,
-  turnEndToStopReason,
   type AcpStopReason,
   type DshTurnEndKind,
 } from '../src/bridge/codec.js'
 
 const KINDS: readonly DshTurnEndKind[] = ['completed', 'max-tokens', 'aborted', 'interrupted', 'blocked', 'error']
 
-describe('turnEndToStopReason (faithful table)', () => {
-  it('is total over the rc.2 turn-end vocabulary and always yields a v1 wire reason', () => {
+describe('settledStopReason (prompt settlement decision)', () => {
+  it('is total over the rc.2 turn-end vocabulary', () => {
     for (const kind of KINDS) {
-      const reason = turnEndToStopReason(kind)
-      expect(['end_turn', 'max_tokens', 'max_turn_requests', 'refusal', 'cancelled'] as const).toContain(reason)
+      const reason = settledStopReason(kind)
+      expect(reason === null || ['end_turn', 'max_tokens', 'max_turn_requests', 'refusal', 'cancelled'].includes(reason)).toBe(true)
     }
   })
 
-  it('maps ordinary quiescence to end_turn', () => {
-    expect(turnEndToStopReason('completed')).toBe('end_turn')
-    expect(turnEndToStopReason('aborted')).toBe('end_turn')
-    expect(turnEndToStopReason('blocked')).toBe('end_turn')
-  })
-
-  it('reserves cancelled for interrupted endings (the client cancel path)', () => {
-    expect(turnEndToStopReason('interrupted')).toBe('cancelled')
-  })
-
-  it('maps max-tokens to the wire max_tokens reason', () => {
-    expect(turnEndToStopReason('max-tokens')).toBe('max_tokens')
-  })
-})
-
-describe('settledStopReason (prompt settlement decision)', () => {
   it('rejects error endings (returns null so the caller chooses the RequestError path)', () => {
     expect(settledStopReason('error')).toBeNull()
   })
@@ -42,10 +25,14 @@ describe('settledStopReason (prompt settlement decision)', () => {
     expect(settledStopReason('max-tokens')).toBe('end_turn')
   })
 
-  it('keeps every other quiescent ending', () => {
+  it('maps ordinary quiescence to end_turn', () => {
     expect(settledStopReason('completed')).toBe('end_turn')
-    expect(settledStopReason('interrupted')).toBe('cancelled')
     expect(settledStopReason('aborted')).toBe('end_turn')
+    expect(settledStopReason('blocked')).toBe('end_turn')
+  })
+
+  it('reserves cancelled for interrupted endings (the client cancel path)', () => {
+    expect(settledStopReason('interrupted')).toBe('cancelled')
   })
 
   it('never returns a reason outside the v1 StopReason union', () => {

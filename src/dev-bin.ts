@@ -89,11 +89,7 @@ process.stdin.on('end', () => {
   stdinEnded = true
 })
 
-const ownOps = loadOverlayPatches(NAME, ownPatchPath())
-const userOps = process.env.DSH_ACP_OVERLAY !== undefined
-  ? loadOverlayPatches(NAME, resolve(process.env.DSH_ACP_OVERLAY))
-  : []
-const patches = [...basePatchOps(), ...ownOps, ...presetOverlayOps(), ...userOps]
+const patches = [...basePatchOps(), ...loadOverlayPatches(NAME, ownPatchPath()), ...presetOverlayOps()]
 
 app = (await boot(NAME, rootEntriesPath(), patches)) as App
 

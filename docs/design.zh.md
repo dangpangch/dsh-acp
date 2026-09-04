@@ -70,6 +70,10 @@ dsh-acp-interactive **本质上是一个 dsh plugin**（dsh bundle 包，声明
   `/name` 手势——因为 dsh `tool-skill` pre-step 只认裸 `/kebab-name`，归一后
   才会装载 skill 正文）、`scanPrompt`、`encodedImages`（附件落盘 + 识图能力
   门控）。
+- **resource 块优雅降级**（`resourceText`，pi-acp 同款）：客户端忽略
+  `embeddedContext:false` 通告硬塞 `resource` 块时不炸——text resource 的正文
+  以 `[embedded context <uri> (<mime>)]` 折叠拼进相邻文本段；blob/未知 payload
+  只留标记不倾倒解码字节；纯 resource 提示也算非空。audio 仍是唯一硬拒绝。
 - 斜杠行（以 `/` 开头的整行）→ dsh 命令平面；未知命令回退为普通用户文本。
 - 进入模型：`agent.followup`；取消走 agent cancel。
 
@@ -87,8 +91,8 @@ dsh-acp-interactive **本质上是一个 dsh plugin**（dsh bundle 包，声明
 ### 3.4 工具卡片
 
 - `tool/call` → `session_update: tool_call`（toolCallId/kind/status/title/
-  name/rawInput）；`tool/result` → `tool_call_update`（completed/failed +
-  content ≤8000 字符截断）。
+  name/rawInput/**locations**）；`tool/result` → `tool_call_update`
+  （completed/failed + content ≤8000 字符截断 / **diff 卡**，见下）。
 - 分类 `toolKindFor`：bash/pwsh→execute、write/edit/str_replace…→edit、
   read/read_image→read、search 系→search、rm/delete 系→delete、其余 other。
 - **execute 卡标题携带具体命令行**（`tool-cards.ts`）：Zed 1.18 把 execute 类
@@ -96,8 +100,25 @@ dsh-acp-interactive **本质上是一个 dsh plugin**（dsh bundle 包，声明
   （`should_show_raw_input = !is_terminal_tool && …`）；external ACP agent 没
   有真实 Zed terminal，故 `title` = 原样命令（trim、400 字符截断 + `…`），呈
   现原生 "Run Command" 卡。其余类型保持工具名（参数走 Zed raw-input 展开）。
+- **follow-along locations**（`toolCallLocation`，pi-acp 惯例）：工具参数里的
+  `file_path`/`path` 按 cwd 绝对化后进 `tool_call.locations`，Zed 便随卡片实
+  时高亮/跳转 agent 正在触碰的文件。行号按参数形状推断：`read` 的 `offset`、
+  str_replace_editor 的 `view_range` 首行 / `insert` 的 `insert_line+1`、
+  edit/str_replace 的 `old_string` 在**当前文件**中唯一匹配到的行（工具执行
+  前同步读一次，pi-acp 同款；读不到/重复匹配只丢行号不丢路径）。不带文件参
+  数的工具（bash/grep/todo…）不发 locations。
+- **结构化 diff 卡**（`diffForToolCall` + `toolCallDiffContent`）：ACP
+  `ToolCallContent {type:'diff'}` 让客户端渲染真正的 diff 视图而非 8KB 截断
+  文本。来源两档：① 持久 `tool/result` 的 `meta.diffs`——dsh-tool-fs 的
+  write/edit 本就把"应用后的上下文 hunk"投影进 meta；② 参数自描述——
+  str_replace_editor 不产 meta，其 `old_str→new_str` / `create` 的
+  `file_text` 即 diff；write 创建新文件时 meta 为空数组，同样回落到整文件新
+  建 diff。失败/非变更调用不发 diff；确认文本仍随 diff 一起发，不支持 diff
+  的客户端降级为纯文本卡。
 - `ask_user_question` 的调用记录到 `askCall`（按会话），其结果→elicitation。
-- live 与 replay（§4）共用同一批纯函数，卡片逐字节一致。
+- live 与 replay（§4）共用同一批纯函数，卡片逐字节一致（replay 不做行号推
+  断——文件早已变化，只发路径；call↔result 的 diff 配对在 replay 侧用
+  callId map 重建）。
 
 ### 3.5 plan / 斜杠目录 / skills / 会话选项 / 权限
 
@@ -131,8 +152,11 @@ dsh-acp-interactive **本质上是一个 dsh plugin**（dsh bundle 包，声明
 
 先实现、后声明；未实现一律**不悬空声明**：session fork、terminal/fs 执行委托
 （工具仍在 dsh 沙箱内跑）、`additionalDirectories`、audio/embeddedContext、
-细粒度 diff 卡片、Windows。MCP：非空 `mcpServers` → `invalidParams`（如实拒
-绝，本轮不做）。
+Windows。`embeddedContext` 虽不声明（embedded resource 不是一等 prompt 输
+入），但 `resource` 块会**优雅降级**为纯文本继续跑（§3.2），而非拒绝整个
+prompt。diff 卡片与 locations 属于 `tool_call`/`tool_call_update` 的可选字
+段，无需能力声明（§3.4）。MCP：非空 `mcpServers` → `invalidParams`（如实
+拒绝，本轮不做）。
 
 ## 4. 会话历史与回放（durable history）
 
@@ -140,7 +164,8 @@ dsh-acp-interactive **本质上是一个 dsh plugin**（dsh bundle 包，声明
   `ctx.sessions.flush` 在 close/dispose 时落盘。
 - **load = resume + 回放**：只回放提交且模型可见的事实——
   `assistant/message` 文本/思考块整体流出、`tool/call`+`tool/result` 卡片复现
-  （同 live 纯函数）、图片降级为 `[image: …]` 占位、todo 历史折叠为**一张**
+  （同 live 纯函数，含 locations 路径与 meta/参数来源的 diff 卡；行号推断回
+  放不做）、图片降级为 `[image: …]` 占位、todo 历史折叠为**一张**
   最终 plan；原始 delta / usage / 私有呈现数据不进回放。
 - `session/resume` **不回放**（SDK 语义）。
 
@@ -159,6 +184,9 @@ dsh-acp-interactive **本质上是一个 dsh plugin**（dsh bundle 包，声明
 | 斜杠目录 | 命令平面 + user-invocable skills；`skill:<name>` 命名、分区保序、变更实时重通告（见 §3.5） |
 | skill 执行 | prompt 归一 `/skill:<name>`→`/name`，tool-skill pre-step 装载（见 §3.2） |
 | 工具卡标题 | execute 卡 title = 具体命令行（见 §3.4） |
+| follow-along | `tool_call.locations`：file_path/path 绝对化 + 行号推断（read offset / view_range / insert+1 / old_string 唯一匹配，见 §3.4） |
+| diff 卡片 | `tool_call_update` 结构化 diff：优先持久 meta.diffs（write/edit hunk），回落参数自描述（str_replace_editor / 新建文件，见 §3.4） |
+| resource 块 | 不声明 embeddedContext，但优雅降级为纯文本（pi-acp 同款，见 §3.2） |
 | elicitation | userQuestions provider + createElicitation（client capability 门控） |
 | 权限档 | config option `permission`（permissionPresets.set） |
 | MCP | 本轮不做：非空 mcpServers → invalidParams |
@@ -170,7 +198,7 @@ dsh-acp-interactive **本质上是一个 dsh plugin**（dsh bundle 包，声明
 
 ```bash
 pnpm typecheck && pnpm build          # tsc --noEmit；tsdown -> lib/
-pnpm test                             # vitest（89 项；含真实 spawn 的帧纯净与会话历史探针）
+pnpm test                             # vitest（104 项；含真实 spawn 的帧纯净与会话历史探针）
 node scripts/history-probe.mjs        # 会话历史端到端（隔离 DSH_HOME）
 # dev boot smoke（隔离 DSH_HOME）
 printf '…initialize…\n…session/new…' | node lib/dev-bin.js   # 2 result + exit 0
@@ -187,14 +215,17 @@ printf '…' | DSH_HOME=$DSH_HOME dsh --profile acp            # 2 result + exit
 1. Custom Agent 线程建立，文本/思考流式可见；
 2. 沙箱权限：写工程内成功、写工程外被拦并弹 Allow once / Reject once；
 3. 工具卡片：execute 卡标题显示具体命令行，有输出/退出码；
-4. 长回答增量流式；
-5. 齿轮菜单切换 Model / Thought Level / Write permission 且下回合生效；
-6. `/` 菜单：命令 + `/skill:find-skills` 式 skill 条目，选中即装载执行；
-7. 关闭线程后从 recent threads 恢复（resume/load），上下文连贯；
-8. ask 表单可作答；
-9. 取消长任务 → 回合 cancelled、无残留子进程；
-10. 缺 key → Authenticate 引导，配好即恢复；
-11. 诊断：Acp Logs 有 JSON-RPC 记录、stderr 无协议帧泄漏。
+4. follow-along：read/edit 卡片让 Zed 实时高亮 agent 正在看的文件（含行
+   号）；编辑卡片渲染真正的 diff 视图（非截断文本）；
+5. 长回答增量流式；
+6. 齿轮菜单切换 Model / Thought Level / Write permission 且下回合生效；
+7. `/` 菜单：命令 + `/skill:find-skills` 式 skill 条目，选中即装载执行；
+8. 关闭线程后从 recent threads 恢复（resume/load），上下文连贯（回放卡片与
+   live 逐字节一致，diff 卡复现）；
+9. ask 表单可作答；
+10. 取消长任务 → 回合 cancelled、无残留子进程；
+11. 缺 key → Authenticate 引导，配好即恢复；
+12. 诊断：Acp Logs 有 JSON-RPC 记录、stderr 无协议帧泄漏。
 
 ### 6.3 诊断约束速记
 
@@ -203,6 +234,7 @@ printf '…' | DSH_HOME=$DSH_HOME dsh --profile acp            # 2 result + exit
 | stdout 出现非 JSON 行 | 违反不变量 → 报告（launcher 不应写 stdout） |
 | 进程秒退 | 看 stderr（多为组合/预设问题）；`dsh --profile acp </dev/null` 应 exit 0 |
 | 工具卡只有工具名、没有命令 | 旧构建：`pnpm build` 后重启线程（execute 卡标题=命令） |
+| 工具卡不带文件定位/没有 diff 视图 | 旧构建：`pnpm build` 后重启线程（locations/diff 卡随 §3.4 新增） |
 | `/` 无 skill | skill 需 user-invocable 且位于 dsh 扫描根；装/删后本会话实时刷新 |
 | `/skill:名` 不生效 | 看是否出现 `Load skill …` 工具卡（归一化→pre-step 装载路径） |
 
@@ -212,7 +244,7 @@ printf '…' | DSH_HOME=$DSH_HOME dsh --profile acp            # 2 result + exit
 src/bridge/index.ts     插件入口：AgentSideConnection + 会话生命周期 + 事件映射
 src/bridge/catalog.ts   斜杠目录合并（命令平面 + user-invocable skills；纯函数）
 src/bridge/replay.ts    持久历史 → ACP 回放帧（纯函数）
-src/bridge/tool-cards.ts 卡片分类/rawInput/标题（execute 标题=命令；纯函数）
+src/bridge/tool-cards.ts 卡片分类/rawInput/标题/locations/diff（execute 标题=命令；纯函数）
 src/bridge/{codec,updates,content,config-options,session-store}.ts  纯映射/builder 模块（§3）
 src/dev-bin.ts          独立 dev/test boot（dsh-base + 本包 patch + presets fixture）
 cordis.patch.yml        bundle 补丁（§2.1）

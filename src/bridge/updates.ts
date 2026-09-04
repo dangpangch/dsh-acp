@@ -6,6 +6,7 @@
 // and folds, unit-testable offline.
 import type { SessionNotification } from '@agentclientprotocol/sdk'
 import type { SessionEvent, TodoItem } from '@deepseek-ai/dsh-session'
+import { isAbsolute, resolve } from 'node:path'
 
 export type SessionIdLike = string
 
@@ -92,10 +93,30 @@ export function committedBlockRemainder(
  * Terminal tool-call card content: one content block, truncated so a huge raw
  * result cannot flood the client frame.
  */
-export function toolCallContent(text: string, maxChars = 8000): { type: 'content'; content: { type: 'text'; text: string } }[] | undefined {
+export function toolCallContent(text: string): { type: 'content'; content: { type: 'text'; text: string } }[] | undefined {
+  const maxChars = 8000
   const trimmed = text.length > maxChars ? `${text.slice(0, maxChars)}\n… [truncated]` : text
   if (trimmed.length === 0) return undefined
   return [{ type: 'content', content: { type: 'text', text: trimmed } }]
+}
+
+/**
+ * Structured diff card content (ACP `ToolCallContent {type: 'diff'}`): the
+ * client renders a real diff view instead of raw tool text. The model-facing
+ * confirmation text still rides alongside, so clients without diff support
+ * degrade to the plain text card. Paths are absolutized against the session
+ * cwd (the diff vocabulary uses the model-facing, possibly relative path).
+ */
+export function toolCallDiffContent(
+  diffs: readonly { path: string; oldText: string | null; newText: string }[],
+  cwd: string,
+): { type: 'diff'; path: string; oldText?: string | null; newText: string }[] {
+  return diffs.map((diff) => ({
+    type: 'diff' as const,
+    path: isAbsolute(diff.path) ? diff.path : resolve(cwd, diff.path),
+    ...(diff.oldText !== null ? { oldText: diff.oldText } : {}),
+    newText: diff.newText,
+  }))
 }
 
 /**

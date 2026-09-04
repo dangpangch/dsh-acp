@@ -1,5 +1,5 @@
 // session-list-load-delete + session-restore: durable session history over the
-// real dev boot with an isolated DSH_HOME (acceptance.md §4). The heavy spawn
+// real dev boot with an isolated DSH_HOME (design.zh.md §4/§6.1). The heavy spawn
 // choreography and all content assertions live in scripts/history-probe.mjs
 // (its children must not inherit resolver env like NODE_PATH, which breaks
 // the cordis loader under vitest); this test just runs the probe and pins

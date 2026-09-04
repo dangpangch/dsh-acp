@@ -42,7 +42,6 @@ export function connect(bin, env) {
       child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n')
       return promise
     },
-    send(lines) { child.stdin.write(lines) },
     closeStdin() { child.stdin.end() },
     exitCode() { return code !== undefined ? Promise.resolve(code) : exited },
     stderrText() { return errbuf.join('') },

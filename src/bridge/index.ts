@@ -42,12 +42,14 @@ import {
 import { installModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, errorChain, ReasoningEffortId, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { Agent, AgentCancelCause } from '@deepseek-ai/dsh-agent'
+// Type-only dependency: registers dsh-user-approval's `approval/request`
+// event on the cordis Events map so the typed ctx.on handler below compiles.
 import type {} from '@deepseek-ai/dsh-user-approval'
 import { SessionId as brandSessionId, type Session, type SessionEvent, type SessionId } from '@deepseek-ai/dsh-session'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { AskUserQuestionAnswer, AskUserQuestionRequest } from '@deepseek-ai/dsh-user-questions'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
-import { rmSync } from 'node:fs'
+import { rmSync, readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 
 import type { ContentBlock as AcpContentBlock } from '@agentclientprotocol/sdk'
@@ -57,31 +59,35 @@ import {
   isImageMediaType,
   persistImages,
   scanPrompt,
+  type AttachmentStoreSeam,
 } from './content.js'
 import { settledStopReason, type DshTurnEndKind } from './codec.js'
 import {
-  SessionStore,
   createInflight,
   drainRecord,
   makeRecord,
+  removeRecord,
   requestStop,
   type PromptInflight,
   type SessionRecord,
+  type SessionRegistry,
 } from './session-store.js'
 import {
   assistantTextChunk,
   assistantThoughtChunk,
   commandsUpdate,
   committedBlockRemainder,
+  foldTodoPlan,
   planUpdate,
   sessionNotification,
   streamTextDelta,
   toolCallContent,
+  toolCallDiffContent,
   usageUpdate,
 } from './updates.js'
-import { replayPlanFold, replayUpdatesForEvent } from './replay.js'
+import { replayUpdatesForEvent } from './replay.js'
 import { mergeSlashCatalog, normalizeSkillSlashText, type SlashCatalogEntry, type SlashCommandEntry, type SlashSkillEntry } from './catalog.js'
-import { rawInputOf, toolCallTitle, toolKindFor, toolResultCall } from './tool-cards.js'
+import { diffForToolCall, rawInputOf, toolCallLocation, toolCallTitle, toolKindFor, toolResultCall } from './tool-cards.js'
 import {
   currentEffortFor,
   guardReasoningEffort,
@@ -219,11 +225,6 @@ interface LlmCatalogService {
   }>
 }
 
-type AttachmentsService = {
-  readonly imageLimits: { readonly mediaTypes: readonly string[] }
-  saveImages(inputs: readonly { mediaType: string; data: Uint8Array }[]): Promise<readonly ImageAttachmentRef[]>
-}
-
 /** The slash-command line when the prompt starts with '/', else undefined. */
 function slashLine(prompt: readonly AcpContentBlock[]): string | undefined {
   let text = ''
@@ -253,7 +254,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   const logger = ctx.logger
   const sessions = ctx.sessions
   const llm = ctx.get('llm') as LlmCatalogService | undefined
-  const attachments = ctx.get('attachments') as AttachmentsService | undefined
+  const attachments = ctx.get('attachments') as AttachmentStoreSeam | undefined
   const commands = ctx.get('commands') as CommandRuntimeSeam | undefined
   const skills = ctx.get('skills') as SkillRegistrySeam | undefined
   const projections = ctx.get('sessionProjections') as UsageProjectionService | undefined
@@ -262,16 +263,22 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   const persistence = ctx.get('sessionPersistence') as PersistenceSeam | undefined
   const permissionPresets = ctx.get('permissionPresets') as PermissionPresetsSeam | undefined
   const userQuestions = ctx.get('userQuestions') as UserQuestionsSeam | undefined
-  const store = new SessionStore()
+  const store: SessionRegistry = new Map()
   let closed = false
   let imagePromptEnabled = false
   let clientCapabilities: NonNullable<InitializeRequest['clientCapabilities']> | undefined
   // In-flight ACP request handlers: quiescence awaits them so a client that
   // closes stdin right after its requests still receives every reply before
-  // the process exits (acceptance.md §2 immediate-EOF smoke).
+  // the process exits (design.zh.md §6.1 immediate-EOF smoke).
   const activeRequests = new Set<Promise<unknown>>()
   // Latest ask_user_question tool call per session (elicitation tool tie).
   const askCall = new Map<SessionId, string>()
+  // Tool-call id -> (name, parsed arguments) for the diff card at result time:
+  // the `tool/result` event carries only the call id, and the diff source is
+  // the call's arguments (str_replace_editor) or its presentation meta
+  // (write/edit hunks). Entries are pruned once the result lands.
+  const toolCallName = new Map<string, string>()
+  const toolCallArguments = new Map<string, unknown>()
   const elicitationFormsEnabled = (): boolean => {
     const capabilities = clientCapabilities as { elicitation?: { form?: unknown } } | undefined
     return capabilities?.elicitation?.form !== undefined
@@ -421,6 +428,18 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   const deliverToolCall = (record: SessionRecord, call: { callId: string; name: string; arguments: string }): void => {
     const rawInput = rawInputOf(call.arguments)
     const kind = toolKindFor(call.name)
+    // Follow-along: the location must reach the client while the tool runs,
+    // so an `edit`'s line is inferred from the file's CURRENT content (the
+    // tool has not executed yet); the sync readText seam makes the read
+    // synchronous with the call-time card, and a missing file just drops
+    // the line, never the location.
+    const location = toolCallLocation(rawInput, record.cwd, (path) => {
+      try {
+        return readFileSync(path, 'utf8')
+      } catch {
+        return undefined
+      }
+    })
     serialize(record, async () => {
       if (record.closed || record.replaying) return
       await notify(sessionNotification(record.id, {
@@ -431,21 +450,31 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         kind,
         status: 'pending',
         rawInput,
+        ...(location !== undefined ? { locations: [location] } : {}),
       }))
     })
   }
 
   const deliverToolResult = (
     record: SessionRecord,
-    result: { callId: string; text: string; isError: boolean },
+    result: { callId: string; text: string; isError: boolean; name: string; rawInput: unknown; meta: unknown },
   ): void => {
     serialize(record, async () => {
       if (record.closed || record.replaying) return
+      // Structured diff card: mutating tools project their applied hunks onto
+      // the durable tool/result meta (write/edit) or describe the change in
+      // their arguments (str_replace_editor); the confirmation text rides
+      // alongside so diff-less clients degrade to the plain text card.
+      const diffs = diffForToolCall(result.name, result.rawInput, result.meta, result.isError)
+      const textContent = toolCallContent(result.text)
+      const content = diffs === undefined
+        ? textContent
+        : [...toolCallDiffContent(diffs, record.cwd), ...textContent ?? []]
       await notify(sessionNotification(record.id, {
         sessionUpdate: 'tool_call_update',
         toolCallId: result.callId,
         status: result.isError ? 'failed' : 'completed',
-        ...(result.text.length > 0 ? { content: toolCallContent(result.text) } : {}),
+        ...(content !== undefined ? { content } : {}),
       }))
       pushUsage(record)
     })
@@ -514,7 +543,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   // The registry change events ride the same host context the rows mount on.
   if (commands !== undefined || skills !== undefined) {
     const refreshAll = (): void => {
-      for (const record of store.list()) announceSlashCatalog(record)
+      for (const record of store.values()) announceSlashCatalog(record)
     }
     // `skills/change` and `commands/change` are declared on the host-plane
     // registry modules (@deepseek-ai/dsh-skill, @deepseek-ai/dsh-commands) that
@@ -538,11 +567,24 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         break
       case 'tool/call':
         if (event.data.name === 'ask_user_question') askCall.set(record.id, String(event.data.callId))
+        toolCallName.set(String(event.data.callId), event.data.name)
+        toolCallArguments.set(String(event.data.callId), rawInputOf(event.data.arguments))
         deliverToolCall(record, event.data)
         break
       case 'tool/result': {
         const call = toolResultCall(event.data.message)
-        deliverToolResult(record, { callId: call.callId, text: call.text, isError: event.data.error !== undefined })
+        deliverToolResult(record, {
+          callId: call.callId,
+          text: call.text,
+          isError: event.data.error !== undefined,
+          // The diff source pair: the call's arguments (re-parsed; the result
+          // event carries only the id) and the tool's presentation meta.
+          name: toolCallName.get(call.callId) ?? '',
+          rawInput: toolCallArguments.get(call.callId),
+          meta: event.data.meta,
+        })
+        toolCallName.delete(call.callId)
+        toolCallArguments.delete(call.callId)
         break
       }
       case 'todo/write':
@@ -641,11 +683,11 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       if (resolved.reasoning === undefined) return undefined
       return {
         efforts: resolved.reasoning.efforts.map((effort) => ({
-          id: String(effort.id),
+          id: effort.id,
           name: effort.name,
           description: effort.description ?? null,
         })),
-        ...(resolved.reasoning.defaultEffort !== undefined ? { defaultEffort: String(resolved.reasoning.defaultEffort) } : {}),
+        ...(resolved.reasoning.defaultEffort !== undefined ? { defaultEffort: resolved.reasoning.defaultEffort } : {}),
       }
     } catch (error: unknown) {
       logger.warn(`dsh-acp-interactive: reasoning catalog for ${provider}/${model} failed: ${String(error)}`)
@@ -695,8 +737,8 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         ? new Set(reasoning.efforts.map((effort) => effort.id))
         : undefined
       const currentEffort = currentEffortFor(
-        current.reasoningEffort !== undefined ? String(current.reasoningEffort) : undefined,
-        reasoning?.defaultEffort !== undefined ? String(reasoning.defaultEffort) : undefined,
+        current.reasoningEffort !== undefined ? current.reasoningEffort : undefined,
+        reasoning?.defaultEffort,
       )
       out.push({
         type: 'select',
@@ -710,7 +752,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     }
     if (permissionPresets !== undefined) {
       const names = PERMISSION_PRESETS as readonly string[]
-      const currentValue = record.permission ?? (process.env.DSH_PERMISSION_MODE ?? 'workspace-write')
+      const currentValue = record.permission ?? 'workspace-write'
       out.push({
         type: 'select',
         id: CONFIG_ID_PERMISSION,
@@ -767,7 +809,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     if (current?.reasoningEffort === undefined) return
     const supported = record.supportedEfforts
     if (supported === undefined) return
-    const guarded = guardReasoningEffort({ reasoningEffort: String(current.reasoningEffort) }, supported)
+    const guarded = guardReasoningEffort({ reasoningEffort: current.reasoningEffort }, supported)
     if (guarded.reasoningEffort === undefined) {
       const { reasoningEffort: _stripped, ...rest } = current
       record.selection.current = rest
@@ -838,7 +880,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   const releaseOnline = async (sessionId: SessionId): Promise<void> => {
     const record = store.get(sessionId)
     if (record === undefined) return
-    store.remove(sessionId, record)
+    removeRecord(store, record)
     await closeOne(record, { kind: 'disposed' })
   }
 
@@ -852,7 +894,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     record: SessionRecord,
     replay?: () => Promise<void>,
   ): Promise<WireConfigOptions> => {
-    store.add(record)
+    store.set(record.id, record)
     try {
       assertOpen()
       const configOptions = await refreshConfigOptions(record)
@@ -861,7 +903,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       // persistence checkpoint also runs at teardown (closeOne) and after
       // real turns. Flushing here would block the response on disk I/O and
       // lose the reply to a client that closes stdin right after its
-      // requests (acceptance.md §2 immediate-EOF smoke).
+      // requests (design.zh.md §6.1 immediate-EOF smoke).
       void sessions.flush(record.agent.session).catch((error: unknown) => {
         logger.warn(`dsh-acp-interactive: background persistence flush failed: ${String(error)}`)
       })
@@ -872,7 +914,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       if (replay !== undefined) await replay()
       return configOptions
     } catch (error: unknown) {
-      if (store.get(record.id) === record) store.remove(record.id, record)
+      if (store.get(record.id) === record) removeRecord(store, record)
       await closeOne(record, { kind: 'disposed' }).catch(() => {})
       throw error
     }
@@ -881,20 +923,29 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   /**
    * Stream one persisted session's history to the client as wire updates
    * (session/load semantics). Committed assistant content and tool cards from
-   * the raw log, ending with the folded plan state; raw deltas and usage never
-   * replay. Each frame is awaited in order so the load response never races it.
+   * the raw log, ending with the todo history folded to one final plan update;
+   * raw deltas and usage never replay. Each frame is awaited in order so the
+   * load response never races it.
    */
   const replayHistory = async (record: SessionRecord, events: readonly SessionEvent[]): Promise<void> => {
     record.replaying = true
     try {
+      // Call-id pairing for the result-time diff card, built as the log walks
+      // (the same pairing the live firehose keeps in toolCallName/Arguments).
+      const calls = new Map<string, { name: string; rawInput: unknown }>()
       for (const event of events) {
         if (record.closed) return
-        for (const update of replayUpdatesForEvent(event)) {
+        if (event.type === 'tool/call') {
+          calls.set(String(event.data.callId), { name: event.data.name, rawInput: rawInputOf(event.data.arguments) })
+        }
+        for (const update of replayUpdatesForEvent(event, { cwd: record.cwd, calls })) {
           await notify(sessionNotification(record.id, update))
         }
       }
-      const plan = replayPlanFold(events)
-      if (plan !== undefined && !record.closed) await notify(sessionNotification(record.id, plan))
+      // One final plan state (last todo/write wins; turn/start clears); a log
+      // that never rendered a plan gets nothing — replay never fabricates.
+      const entries = foldTodoPlan(events)
+      if (entries !== undefined && !record.closed) await notify(sessionNotification(record.id, planUpdate(entries)))
     } finally {
       record.replaying = false
     }
@@ -971,7 +1022,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     async initialize(params: InitializeRequest): Promise<InitializeResponse> {
       clientCapabilities = params.clientCapabilities ?? undefined
       imagePromptEnabled = await supportsImages()
-      // Truthful capability surface (protocol-map.md §1): session history is
+      // Truthful capability surface (design.zh.md §3.6): session history is
       // available whenever the session-query engine is composed; image prompts
       // only when the attachment store and the default route both accept them;
       // elicitation forms only when the client declared form support AND a
@@ -1131,7 +1182,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         cwd = header?.cwd
       }
       if (online !== undefined) {
-        store.remove(sessionId, online)
+        removeRecord(store, online)
         await closeOne(online, { kind: 'user' }).catch(() => {})
       }
       deletePersisted({ id: sessionId, cwd })
@@ -1147,7 +1198,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       } catch (error: unknown) {
         throw internalError(`session close failed: ${errorChain(error)}`)
       } finally {
-        store.remove(sessionId, record)
+        removeRecord(store, record)
       }
       return {}
     },
@@ -1300,7 +1351,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   const quiesce = (): Promise<void> => {
     if (quiescing !== undefined) return quiescing
     closed = true
-    for (const record of store.list()) {
+    for (const record of store.values()) {
       const inflight = record.inflight
       if (inflight !== undefined) {
         inflight.cancelRequested = true
@@ -1314,7 +1365,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       // reply: drain the started handlers (prompts settle 'cancelled', other
       // handlers finish normally) before any record teardown begins.
       await Promise.allSettled([...activeRequests])
-      const records = store.list()
+      const records = [...store.values()]
       const failures: unknown[] = []
       for (const record of records) {
         try {
@@ -1322,7 +1373,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         } catch (error: unknown) {
           failures.push(error)
         }
-        store.remove(record.id, record)
+        removeRecord(store, record)
       }
       if (failures.length > 0) {
         const detail = failures.map((failure) => errorChain(failure)).join('; ')

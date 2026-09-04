@@ -1,5 +1,5 @@
-// config-options: model + thought_level selector builders (acceptance.md §4
-// `config-options`; design.zh.md §6.3). Pure catalog math, no harness needed.
+// config-options: model + thought_level selector builders (design.zh.md §3.5
+// config options; §6.2 offline tests). Pure catalog math, no harness needed.
 import { describe, expect, it } from 'vitest'
 import {
   currentEffortFor,

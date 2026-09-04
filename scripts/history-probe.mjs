@@ -49,7 +49,7 @@ const open = () => connect(BIN, { DSH_HOME: home })
   c.closeStdin()
   console.log('C exit =', await c.exitCode())
 
-  // Assertions mirror the acceptance checks; a mismatch exits non-zero.
+  // Assertions mirror the design checks (design.zh.md §6.1); a mismatch exits non-zero.
   const assert = (cond, label) => {
     if (!cond) {
       console.error(`PROBE FAIL: ${label}`)

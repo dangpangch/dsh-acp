@@ -8,8 +8,14 @@ import type { ContentBlock as AcpContentBlock } from '@agentclientprotocol/sdk'
 import type { AttachmentStore, ImageAttachmentRef, SaveImageAttachment } from '@deepseek-ai/dsh-attachment'
 import { isImageAdmissionError } from '@deepseek-ai/dsh-attachment'
 
-/** The one attachment-store operation the bridge uses. */
-export type AttachmentStoreSeam = Pick<AttachmentStore, 'saveImages'>
+/**
+ * The attachment service the bridge uses: its advertised image limits gate
+ * prompt capability and its store persists the decoded batch. Both faces
+ * (limit probe in index.ts, save in persistImages) share this one seam.
+ */
+export type AttachmentStoreSeam = Pick<AttachmentStore, 'saveImages'> & {
+  readonly imageLimits: { readonly mediaTypes: readonly string[] }
+}
 
 /** Raster formats shared by ACP image blocks and dsh's attachment store. */
 export const IMAGE_MEDIA_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
@@ -60,10 +66,34 @@ export function resourceLinkText(block: Extract<AcpContentBlock, { type: 'resour
 }
 
 /**
+ * Graceful degradation of one embedded resource into plain prompt text (the
+ * pi-acp approach): a text resource contributes its body inline; a blob or an
+ * unknown payload contributes only a marker, so a client that ignored the
+ * `embeddedContext: false` advertisement still gets its context through
+ * instead of the whole prompt failing.
+ */
+export function resourceText(block: Extract<AcpContentBlock, { type: 'resource' }>): string {
+  const resource = block.resource as { uri?: unknown; text?: unknown; blob?: unknown; mimeType?: unknown }
+  const uri = typeof resource.uri === 'string' ? resource.uri : '(unknown)'
+  if (typeof resource.text === 'string') {
+    const mime = typeof resource.mimeType === 'string' ? resource.mimeType : 'text/plain'
+    return `\n[embedded context ${uri} (${mime})]\n${resource.text}\n`
+  }
+  if (typeof resource.blob === 'string') {
+    const mime = typeof resource.mimeType === 'string' ? resource.mimeType : 'application/octet-stream'
+    const bytes = Buffer.byteLength(resource.blob, 'base64')
+    return `\n[embedded context ${uri} (${mime}, ${bytes} bytes, not decoded)]\n`
+  }
+  return `\n[embedded context ${uri}]\n`
+}
+
+/**
  * Validate one ACP prompt in wire order and return its decoded images in
- * wire order. text/resource_link pass through; audio and embedded resources
- * are rejected (never advertised). Every block is validated before any image
- * write starts, so a rejected batch persists nothing.
+ * wire order. text/resource_link pass through; embedded resources degrade to
+ * plain text (see resourceText) even though the capability is not advertised,
+ * so a client that sends one anyway does not lose its prompt; audio stays the
+ * only hard rejection. Every block is validated before any image write
+ * starts, so a rejected batch persists nothing.
  */
 export function scanPrompt(prompt: readonly AcpContentBlock[], imageEnabled: boolean): AdmittedImage[] {
   const images: AdmittedImage[] = []
@@ -71,6 +101,7 @@ export function scanPrompt(prompt: readonly AcpContentBlock[], imageEnabled: boo
     switch (block.type) {
       case 'text':
       case 'resource_link':
+      case 'resource':
         break
       case 'image':
         if (!imageEnabled) throw new AcpContentError('inline image prompts were not advertised by this connection', 'invalid')
@@ -78,8 +109,6 @@ export function scanPrompt(prompt: readonly AcpContentBlock[], imageEnabled: boo
         break
       case 'audio':
         throw new AcpContentError('audio prompt content is not supported', 'invalid')
-      case 'resource':
-        throw new AcpContentError('embedded resource prompt content is not supported', 'invalid')
       default:
         throw new AcpContentError('unsupported ACP prompt content', 'invalid')
     }
@@ -139,6 +168,9 @@ export function contentForPrompt(
         break
       case 'resource_link':
         pendingText += resourceLinkText(block)
+        break
+      case 'resource':
+        pendingText += resourceText(block)
         break
       case 'image': {
         flushText()
