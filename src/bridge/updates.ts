@@ -20,6 +20,15 @@ export function assistantTextChunk(text: string): SessionNotification['update'] 
   return { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } }
 }
 
+/**
+ * One committed user text block as a `user_message_chunk`. `messageId` groups
+ * a replayed message's blocks client-side (Zed merges adjacent user chunks
+ * that share it), so every block of one stored message passes the same id.
+ */
+export function userMessageChunk(text: string, messageId: string): SessionNotification['update'] {
+  return { sessionUpdate: 'user_message_chunk', content: { type: 'text', text }, messageId }
+}
+
 /** Reasoning text as an `agent_thought_chunk`. */
 export function assistantThoughtChunk(text: string): SessionNotification['update'] {
   return { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text } }

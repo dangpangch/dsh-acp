@@ -1,8 +1,9 @@
 // replay: durable session history -> wire update conversion for session/load
 // (design.zh.md §4 `session-list-load`; design §6.2). Pure mapping tests:
-// committed assistant content streams whole, tool cards reproduce (with
-// follow-along locations and structured diffs), todo history folds to one
-// final plan, raw deltas never leak.
+// committed assistant content streams whole, direct user prompts replay as
+// user_message_chunk (synthetic user-role contexts stay out), tool cards
+// reproduce (with follow-along locations and structured diffs), todo history
+// folds to one final plan, raw deltas never leak.
 import { describe, expect, it } from 'vitest'
 import type { SessionEvent, SessionEventMap } from '@deepseek-ai/dsh-session'
 import { foldTodoPlan, planUpdate } from '../src/bridge/updates.js'
@@ -49,6 +50,48 @@ describe('replayUpdatesForEvent', () => {
       { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hello' } },
       { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'thinking...' } },
     ])
+  })
+
+  it('replays a direct user prompt as user_message_chunk (messageId from seq)', () => {
+    const userEvent = event('user/message', {
+      content: [{ type: 'text', text: 'fix the bug' }],
+      source: { kind: 'user' },
+    }) as SessionEvent & { seq: number }
+    userEvent.seq = 7
+    const updates = replayUpdatesForEvent(userEvent, ctx)
+    expect(updates).toEqual([
+      { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'fix the bug' }, messageId: '7' },
+    ])
+  })
+
+  it('groups one user message\'s blocks under a shared messageId and degrades images', () => {
+    const userEvent = event('user/message', {
+      content: [
+        { type: 'text', text: 'look at this' },
+        { type: 'image', image: { name: 'shot.png', mediaType: 'image/png' } },
+      ],
+      source: { kind: 'user' },
+    }) as SessionEvent & { seq: number }
+    userEvent.seq = 3
+    const updates = replayUpdatesForEvent(userEvent, ctx)
+    expect(updates).toEqual([
+      { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'look at this' }, messageId: '3' },
+      { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: '[image: shot.png]' }, messageId: '3' },
+    ])
+  })
+
+  it('stays silent for synthetic user-role events (injected contexts, goal rounds, compaction checkpoints)', () => {
+    for (const source of [
+      { kind: 'plugin', plugin: 'dsh-agent-instructions', form: 'instructions' },
+      { kind: 'goal', goalId: 'g', revision: 1, round: 2 },
+      { kind: 'plugin', plugin: 'compact', compactionId: 'c1' },
+    ]) {
+      const updates = replayUpdatesForEvent(event('user/message', {
+        content: [{ type: 'text', text: 'synthetic context' }],
+        source,
+      }), ctx)
+      expect(updates).toEqual([])
+    }
   })
 
   it('degrades replayed image blocks to a bracketed placeholder', () => {

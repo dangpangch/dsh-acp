@@ -163,6 +163,9 @@ prompt。diff 卡片与 locations 属于 `tool_call`/`tool_call_update` 的可�
 - 数据源：`ctx.sessionQuery`（listSessions / readSession events）+ 
   `ctx.sessions.flush` 在 close/dispose 时落盘。
 - **load = resume + 回放**：只回放提交且模型可见的事实——
+  `user/message` 中 `source: 'user'` 的直发提问以 `user_message_chunk`
+  回放（带 messageId 供客户端分块合并；注入上下文/goal 轮/compaction
+  checkpoint 等合成 user 角色事件不回放）、
   `assistant/message` 文本/思考块整体流出、`tool/call`+`tool/result` 卡片复现
   （同 live 纯函数，含 locations 路径与 meta/参数来源的 diff 卡；行号推断回
   放不做）、图片降级为 `[image: …]` 占位、todo 历史折叠为**一张**
