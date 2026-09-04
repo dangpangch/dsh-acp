@@ -8,7 +8,8 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "allowJs": false,
+    "allowJs": true,
+    "checkJs": false,
     "verbatimModuleSyntax": true
   },
   "include": ["src", "tests", "tsdown.config.ts"]

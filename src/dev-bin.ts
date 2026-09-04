@@ -19,18 +19,15 @@ function packageRoot(): string {
 /** The empty entries root the include loader mounts; patches layer on top. */
 function rootEntriesPath(): string {
   const root = packageRoot()
-  for (const dir of [root, dirname(root)]) {
-    if (existsSync(join(dir, 'boot.yml'))) return join(dir, 'boot.yml')
-  }
+  const boot = join(root, 'boot.yml')
+  if (existsSync(boot)) return boot
   throw new Error(`${NAME}: boot.yml not found next to the package root`)
 }
 
 /** This package's bundle patch file. */
 function ownPatchPath(): string {
-  const root = packageRoot()
-  for (const p of [join(root, 'cordis.patch.yml'), join(dirname(fileURLToPath(import.meta.url)), '..', 'cordis.patch.yml')]) {
-    if (existsSync(p)) return p
-  }
+  const patch = join(packageRoot(), 'cordis.patch.yml')
+  if (existsSync(patch)) return patch
   throw new Error(`${NAME}: cordis.patch.yml not found next to the package root`)
 }
 

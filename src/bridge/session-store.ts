@@ -39,8 +39,6 @@ export interface PromptInflight {
   outputError: Error | undefined
   /** First agent failure correlated to this prompt. */
   agentError: Error | undefined
-  /** Slash-command prompts settle against agent quiescence, not a turn. */
-  waitForIdle: boolean | undefined
   /** A slash command that ran without a model turn may end without turn/end. */
   noTurnExpected: boolean | undefined
   /** Whether a slash command executed (no user message was queued). */
@@ -78,8 +76,6 @@ export interface SessionRecord {
   streamedReasoning: Map<string, string>
   /** True while the record streams historical replay (no live output yet). */
   replaying: boolean
-  /** Client-facing capabilities snapshot captured at initialize. */
-  capabilities: unknown
 }
 
 /** Registry of every live bridge session, keyed by shared agent/session id. */
@@ -131,7 +127,6 @@ export function createInflight(): PromptInflight {
     admissionController: new AbortController(),
     outputError: undefined,
     agentError: undefined,
-    waitForIdle: undefined,
     noTurnExpected: undefined,
     commandExecuted: undefined,
   }
@@ -143,7 +138,6 @@ export function makeRecord(
   cwd: string,
   handle: AgentHandle,
   selection: ModelSelectionRef,
-  capabilities: unknown,
 ): SessionRecord {
   return {
     id,
@@ -159,7 +153,6 @@ export function makeRecord(
     sentPlanFold: undefined,
     everSentPlan: false,
     replaying: false,
-    capabilities,
     streamedText: new Map(),
     streamedReasoning: new Map(),
   }

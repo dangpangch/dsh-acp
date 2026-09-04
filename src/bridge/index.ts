@@ -38,7 +38,6 @@ import {
   type PromptResponse,
   type ResumeSessionRequest,
   type SessionNotification,
-  type Stream,
 } from '@agentclientprotocol/sdk'
 import { installModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, errorChain, ReasoningEffortId, type ContentBlock } from '@deepseek-ai/dsh-llm'
@@ -104,8 +103,6 @@ export const inject = ['agents', 'sessions', 'sessionQuery', 'sessionPersistence
 export interface BridgeConfig {
   provider?: string
   model?: string
-  /** Runtime-only transport override; production uses stdio. */
-  stream?: Stream
 }
 
 export const Config: Schema<BridgeConfig> = Schema.object({
@@ -789,7 +786,11 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     }
   }
 
-  const validateWorkspaceParams = (params: NewSessionRequest): void => {
+  const validateWorkspaceParams = (params: {
+    cwd: string
+    additionalDirectories?: readonly unknown[] | null
+    mcpServers?: readonly unknown[] | null
+  }): void => {
     if (!isAbsolute(params.cwd)) throw invalidParams(`cwd must be an absolute path: ${params.cwd}`)
     if (params.additionalDirectories !== undefined && params.additionalDirectories !== null && params.additionalDirectories.length > 0) {
       throw invalidParams('additionalDirectories is not supported')
@@ -842,6 +843,42 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   }
 
   /**
+   * Publish a freshly built record (session/new and load/resume share the
+   * tail): register, build config options, kick off the background durability
+   * flush and the deferred slash-catalog announcement, and roll the record
+   * back loudly on failure.
+   */
+  const registerRecord = async (
+    record: SessionRecord,
+    replay?: () => Promise<void>,
+  ): Promise<WireConfigOptions> => {
+    store.add(record)
+    try {
+      assertOpen()
+      const configOptions = await refreshConfigOptions(record)
+      assertOpen()
+      // Durability for an empty session is a background concern: the
+      // persistence checkpoint also runs at teardown (closeOne) and after
+      // real turns. Flushing here would block the response on disk I/O and
+      // lose the reply to a client that closes stdin right after its
+      // requests (acceptance.md §2 immediate-EOF smoke).
+      void sessions.flush(record.agent.session).catch((error: unknown) => {
+        logger.warn(`dsh-acp-interactive: background persistence flush failed: ${String(error)}`)
+      })
+      // Slash catalog (commands + user-invocable skills): deferred past the
+      // session/new response — Zed ignores notifications for session ids it
+      // does not know yet (design §6.6).
+      announceSlashCatalog(record)
+      if (replay !== undefined) await replay()
+      return configOptions
+    } catch (error: unknown) {
+      if (store.get(record.id) === record) store.remove(record.id, record)
+      await closeOne(record, { kind: 'disposed' }).catch(() => {})
+      throw error
+    }
+  }
+
+  /**
    * Stream one persisted session's history to the client as wire updates
    * (session/load semantics). Committed assistant content and tool cards from
    * the raw log, ending with the folded plan state; raw deltas and usage never
@@ -866,10 +903,9 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   /** One ordered "create-or-resume" agent handle for history loads. */
   const resumeAgentFor = async (
     sessionId: SessionId,
-    cwd: string,
     selection: ModelSelectionRef,
     agentPreset: string | undefined,
-  ): Promise<{ handle: Awaited<ReturnType<typeof agents.create>>; presetId: string | undefined }> => {
+  ): Promise<Awaited<ReturnType<typeof agents.create>>> => {
     const defaults = defaultSelection()
     if (defaults.provider !== undefined && defaults.model !== undefined) {
       selection.current = { provider: defaults.provider, model: defaults.model }
@@ -885,7 +921,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     const agentOptions = defaults.provider !== undefined || defaults.model !== undefined
       ? { provider: defaults.provider, model: defaults.model } as { provider?: string; model?: string }
       : undefined
-    const handle = await agents.resume({
+    return agents.resume({
       resumeSessionId: sessionId,
       agentOptions,
       setup: async (agentCtx) => {
@@ -895,12 +931,10 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         }
       },
     })
-    return { handle, presetId }
   }
 
   /** Best-effort durable delete of one session artifact (idempotent). */
   const deletePersisted = (header: { id: SessionId; cwd?: string }): void => {
-    if (process.env.DSH_ACP_DEBUG) console.error('[dbg] deletePersisted', header)
     if (persistence === undefined) return
     if (header.cwd === undefined || header.cwd.length === 0) {
       logger.warn(`dsh-acp-interactive: durable delete skipped: session cwd is unknown`)
@@ -916,24 +950,18 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     if (location === undefined) return
     const sessionsRoot = join(resolveDshHome(), 'sessions')
     const artifact = location.path
-    if (process.env.DSH_ACP_DEBUG) console.error('[dbg] artifact', artifact, 'root', sessionsRoot)
     if (!artifact.startsWith(sessionsRoot)) {
       logger.warn(`dsh-acp-interactive: refusing to delete artifact outside the sessions root: ${artifact}`)
       return
     }
     const sessionDir = dirname(artifact)
-    const leaf = basename(sessionDir)
-    const uuidLeaf = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(leaf)
-    const sessionUuidLeaf = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(leaf)
-    if (!uuidLeaf && !sessionUuidLeaf) {
+    if (!/^(session-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(basename(sessionDir))) {
       logger.warn(`dsh-acp-interactive: refusing to delete unexpected artifact layout: ${artifact}`)
       return
     }
     try {
       rmSync(sessionDir, { recursive: true, force: true })
-      if (process.env.DSH_ACP_DEBUG) console.error('[dbg] removed', sessionDir)
     } catch (error: unknown) {
-      if (process.env.DSH_ACP_DEBUG) console.error('[dbg] rm failed', String(error))
       logger.warn(`dsh-acp-interactive: durable delete failed: ${errorChain(error)}`)
     }
   }
@@ -1031,30 +1059,8 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         await handle.dispose().catch(() => {})
         throw internalError('connection closed during session/new')
       }
-      const record = makeRecord(sessionId, params.cwd, handle, selection, clientCapabilities)
-      store.add(record)
-      try {
-        assertOpen()
-        const configOptions = await refreshConfigOptions(record)
-        assertOpen()
-        // Durability for an empty session is a background concern: the
-        // persistence checkpoint also runs at teardown (closeOne) and after
-        // real turns. Flushing here would block the response on disk I/O and
-        // lose the reply to a client that closes stdin right after its
-        // requests (acceptance.md §2 immediate-EOF smoke).
-        void sessions.flush(record.agent.session).catch((error: unknown) => {
-          logger.warn(`dsh-acp-interactive: background persistence flush failed: ${String(error)}`)
-        })
-        // Slash catalog (commands + user-invocable skills): deferred past the
-        // session/new response — Zed ignores notifications for session ids it
-        // does not know yet (design §6.6).
-        announceSlashCatalog(record)
-        return { sessionId, configOptions }
-      } catch (error: unknown) {
-        if (store.get(sessionId) === record) store.remove(sessionId, record)
-        await closeOne(record, { kind: 'disposed' }).catch(() => {})
-        throw error
-      }
+      const configOptions = await registerRecord(makeRecord(sessionId, params.cwd, handle, selection))
+      return { sessionId, configOptions }
     },
 
     async listSessions(params: ListSessionsRequest): Promise<ListSessionsResponse> {
@@ -1090,52 +1096,28 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       }
       await releaseOnline(sessionId)
       const selection: ModelSelectionRef = { current: undefined, assembled: undefined }
-      const { handle, presetId } = await resumeAgentFor(sessionId, params.cwd, selection, header.agentPreset)
+      const handle = await resumeAgentFor(sessionId, selection, header.agentPreset)
       if (closed) {
         await handle.dispose().catch(() => {})
         throw internalError('connection closed during session load/resume')
       }
-      const record = makeRecord(sessionId, params.cwd, handle, selection, clientCapabilities)
-      store.add(record)
-      try {
-        assertOpen()
-        const configOptions = await refreshConfigOptions(record)
-        assertOpen()
-        void sessions.flush(record.agent.session).catch((error: unknown) => {
-          logger.warn(`dsh-acp-interactive: background persistence flush failed: ${String(error)}`)
-        })
-        announceSlashCatalog(record)
-        if (params.replay && query !== undefined) {
-          const snapshot = await query.readSession(sessionId)
-          await replayHistory(record, snapshot.events)
-        }
-        return { configOptions }
-      } catch (error: unknown) {
-        if (store.get(sessionId) === record) store.remove(sessionId, record)
-        await closeOne(record, { kind: 'disposed' }).catch(() => {})
-        throw error
-      }
+      const record = makeRecord(sessionId, params.cwd, handle, selection)
+      const configOptions = await registerRecord(record, params.replay && query !== undefined
+        ? async () => {
+            const snapshot = await query.readSession(sessionId)
+            await replayHistory(record, snapshot.events)
+          }
+        : undefined)
+      return { configOptions }
     },
 
     async loadSession(params: LoadSessionRequest) {
-      if (params.mcpServers !== undefined && params.mcpServers !== null && params.mcpServers.length > 0) {
-        throw invalidParams('mcpServers is not supported')
-      }
-      if (params.additionalDirectories !== undefined && params.additionalDirectories !== null && params.additionalDirectories.length > 0) {
-        throw invalidParams('additionalDirectories is not supported')
-      }
-      if (!isAbsolute(params.cwd)) throw invalidParams(`cwd must be an absolute path: ${params.cwd}`)
+      validateWorkspaceParams(params)
       return this.prepareHistoryResume({ sessionId: params.sessionId, cwd: params.cwd, replay: true })
     },
 
     async resumeSession(params: ResumeSessionRequest) {
-      if (params.mcpServers !== undefined && params.mcpServers !== null && params.mcpServers.length > 0) {
-        throw invalidParams('mcpServers is not supported')
-      }
-      if (params.additionalDirectories !== undefined && params.additionalDirectories !== null && params.additionalDirectories.length > 0) {
-        throw invalidParams('additionalDirectories is not supported')
-      }
-      if (!isAbsolute(params.cwd)) throw invalidParams(`cwd must be an absolute path: ${params.cwd}`)
+      validateWorkspaceParams(params)
       return this.prepareHistoryResume({ sessionId: params.sessionId, cwd: params.cwd, replay: false })
     },
 
@@ -1208,7 +1190,6 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         const line = slashLine(prompt)
         if (line !== undefined) {
           if (commands === undefined) throw internalError('no command runtime is mounted')
-          inflight.waitForIdle = true
           inflight.noTurnExpected = true
           const exec = await commands.execute(
             record.agent,
@@ -1222,7 +1203,6 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
               deliver(record, assistantTextChunk(exec.result.text))
             }
           } else {
-            inflight.waitForIdle = false
             inflight.noTurnExpected = false
           }
         }
@@ -1305,16 +1285,15 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     },
   }) as typeof implementation
 
-  const stream: Stream = config.stream ?? ndJsonStream(
-    Writable.toWeb(process.stdout) as WritableStream<Uint8Array>,
-    Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>,
-  )
   conn = new AgentSideConnection(
     (connection) => {
       conn = connection
       return trackedImplementation
     },
-    stream,
+    ndJsonStream(
+      Writable.toWeb(process.stdout) as WritableStream<Uint8Array>,
+      Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>,
+    ),
   )
 
   let quiescing: Promise<void> | undefined

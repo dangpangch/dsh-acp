@@ -1,5 +1,4 @@
 import Schema from "@deepseek-ai/schemastery";
-import { Stream } from "@agentclientprotocol/sdk";
 import { Context } from "@deepseek-ai/cordis";
 //#region src/bridge/index.d.ts
 /** Stable cordis plugin name (design.zh.md §5). */
@@ -10,8 +9,6 @@ declare const inject: string[];
 interface BridgeConfig {
   provider?: string;
   model?: string;
-  /** Runtime-only transport override; production uses stdio. */
-  stream?: Stream;
 }
 declare const Config: Schema<BridgeConfig>;
 /**
