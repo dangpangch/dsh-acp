@@ -2,12 +2,14 @@
 // replay paths (design.zh.md §3.4/§6.2). Zed 1.18 renders every
 // execute-kind (bash/pwsh) tool call as a terminal-style card whose header IS
 // the `title` text — it deliberately hides rawInput for execute kind — so the
-// title must carry the concrete command line; otherwise the card shows only
-// the bare tool name ("bash") with no command info. Other kinds keep the plain
-// name because Zed shows their arguments via the raw-input disclosure.
+// title must carry the concrete command line. The title is the primary card
+// text on every kind (other kinds' arguments hide behind a raw-input
+// disclosure), so path-shaped tools title as "read src/bridge/index.ts" and
+// search tools as "glob src/**/*.ts"; only argument-less tools fall back to
+// the bare name.
 import { describe, expect, it } from 'vitest'
 import {
-  EXECUTE_CARD_TITLE_MAX,
+  TOOL_CARD_TITLE_MAX,
   diffForToolCall,
   fileDiffsFromMeta,
   rawInputOf,
@@ -57,11 +59,11 @@ describe('toolCallTitle', () => {
   })
 
   it('truncates pathological commands with an ellipsis', () => {
-    const long = 'x'.repeat(EXECUTE_CARD_TITLE_MAX + 50)
+    const long = 'x'.repeat(TOOL_CARD_TITLE_MAX + 50)
     const title = toolCallTitle('execute', 'bash', { command: long })
-    expect(title.length).toBe(EXECUTE_CARD_TITLE_MAX + 1)
+    expect(title.length).toBe(TOOL_CARD_TITLE_MAX + 1)
     expect(title.endsWith('…')).toBe(true)
-    expect(title.slice(0, EXECUTE_CARD_TITLE_MAX)).toBe(long.slice(0, EXECUTE_CARD_TITLE_MAX))
+    expect(title.slice(0, TOOL_CARD_TITLE_MAX)).toBe(long.slice(0, TOOL_CARD_TITLE_MAX))
   })
 
   it('falls back to the tool name when no command is present', () => {
@@ -73,11 +75,45 @@ describe('toolCallTitle', () => {
     expect(toolCallTitle('execute', 'bash', undefined)).toBe('bash')
   })
 
-  it('keeps the plain tool name on every non-execute kind', () => {
-    expect(toolCallTitle('edit', 'write', { path: '/a/b.txt', text: 'hi' })).toBe('write')
-    expect(toolCallTitle('read', 'read', { path: '/a/b.txt' })).toBe('read')
-    expect(toolCallTitle('search', 'grep', { command: 'git status' })).toBe('grep')
-    expect(toolCallTitle('other', 'ask_user_question', { command: 'echo hi' })).toBe('ask_user_question')
+  it('names the model-facing path on path-shaped cards, relative under the cwd', () => {
+    expect(toolCallTitle('read', 'read', { file_path: '/ws/src/bridge/index.ts' }, '/ws'))
+      .toBe('read src/bridge/index.ts')
+    expect(toolCallTitle('read', 'read', { file_path: 'src/bridge/index.ts' }, '/ws'))
+      .toBe('read src/bridge/index.ts')
+    expect(toolCallTitle('edit', 'str_replace_editor', { path: 'src/a.ts', command: 'str_replace', old_str: 'o', new_str: 'n' }, '/ws'))
+      .toBe('str_replace_editor src/a.ts')
+    expect(toolCallTitle('edit', 'write', { path: '/outside/b.txt', text: 'hi' }, '/ws'))
+      .toBe('write /outside/b.txt')
+    expect(toolCallTitle('delete', 'rm', { path: 'src/old.ts' }, '/ws'))
+      .toBe('rm src/old.ts')
+  })
+
+  it('never keeps an absolute path under a same-prefixed but different cwd', () => {
+    expect(toolCallTitle('read', 'read', { file_path: '/ws2/a.ts' }, '/ws')).toBe('read /ws2/a.ts')
+  })
+
+  it('titles search cards with the pattern and optional scope', () => {
+    expect(toolCallTitle('search', 'glob', { pattern: 'src/**/*.ts' }, '/ws')).toBe('glob src/**/*.ts')
+    expect(toolCallTitle('search', 'grep', { pattern: 'TODO', path: 'src' }, '/ws')).toBe('grep TODO in src')
+    // A scoped search without a pattern still names its scope; no nameable
+    // argument at all falls back to the bare tool name.
+    expect(toolCallTitle('search', 'glob', { path: 'src' }, '/ws')).toBe('glob src')
+    expect(toolCallTitle('search', 'grep', { command: 'git status' }, '/ws')).toBe('grep')
+  })
+
+  it('keeps the bare tool name when the arguments name nothing', () => {
+    expect(toolCallTitle('read', 'read', {}, '/ws')).toBe('read')
+    expect(toolCallTitle('read', 'read', 'not-json', '/ws')).toBe('read')
+    expect(toolCallTitle('read', 'read', undefined)).toBe('read')
+    expect(toolCallTitle('other', 'ask_user_question', { command: 'echo hi' }, '/ws')).toBe('ask_user_question')
+    expect(toolCallTitle('other', 'todo_write', { todos: [{ content: 'x' }] }, '/ws')).toBe('todo_write')
+  })
+
+  it('truncates pathological argument titles with an ellipsis', () => {
+    const longPath = 'd'.repeat(TOOL_CARD_TITLE_MAX + 50)
+    const title = toolCallTitle('read', 'read', { file_path: longPath }, '/ws')
+    expect(title.length).toBe(TOOL_CARD_TITLE_MAX + 1)
+    expect(title.endsWith('…')).toBe(true)
   })
 })
 

@@ -445,7 +445,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       await notify(sessionNotification(record.id, {
         sessionUpdate: 'tool_call',
         toolCallId: call.callId,
-        title: toolCallTitle(kind, call.name, rawInput),
+        title: toolCallTitle(kind, call.name, rawInput, record.cwd),
         name: call.name,
         kind,
         status: 'pending',

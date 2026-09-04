@@ -12,9 +12,12 @@
 // terminal, so the ONLY visible text for a `bash` call is the title we send —
 // a bare tool name reads as "bash" with no command at all. The title of an
 // execute-kind card therefore carries the concrete command line itself, like a
-// native Zed terminal card. Every other kind keeps the plain tool name; Zed
-// shows those arguments through its raw-input disclosure instead.
-import { isAbsolute, resolve } from 'node:path'
+// native Zed terminal card. The title is the card's primary text on every
+// kind (SDK: "Human-readable title describing what the tool is doing"), and
+// Zed only shows the other kinds' arguments behind a raw-input disclosure — so
+// path-shaped tools title as "read src/bridge/index.ts", search tools as
+// "glob src/**/*.ts", and only argument-less tools fall back to the bare name.
+import { isAbsolute, resolve, sep } from 'node:path'
 
 /** First tool-result call id + concatenated visible text of one result message. */
 export function toolResultCall(message: {
@@ -219,11 +222,11 @@ export function diffForToolCall(
 }
 
 /**
- * Max title length for execute-kind cards. Keeps a pathological heredoc or
- * generated script from blowing up the card header; ordinary commands pass
- * through untouched.
+ * Max title length for any tool card. Keeps a pathological heredoc, an
+ * absolute path outside the workspace, or a generated regex from blowing up
+ * the card header; ordinary arguments pass through untouched.
  */
-export const EXECUTE_CARD_TITLE_MAX = 400
+export const TOOL_CARD_TITLE_MAX = 400
 
 /** The model-written command line of a bash/pwsh call, or undefined. */
 function commandOf(rawInput: unknown): string | undefined {
@@ -232,15 +235,60 @@ function commandOf(rawInput: unknown): string | undefined {
   return typeof command === 'string' ? command : undefined
 }
 
+/** First non-blank string argument among the keys, or undefined. */
+function firstStringArg(rawInput: Record<string, unknown>, keys: readonly string[]): string | undefined {
+  for (const key of keys) {
+    const value = rawInput[key]
+    if (typeof value === 'string' && value.trim().length > 0) return value
+  }
+  return undefined
+}
+
+/**
+ * Display form of a model-facing path: cwd-relative when the model passed an
+ * absolute path under the session cwd, verbatim otherwise (a relative
+ * argument already IS the short form, and tools run against that cwd).
+ */
+function displayPathOf(path: string, cwd: string | undefined): string {
+  if (cwd === undefined || !isAbsolute(path)) return path
+  const prefix = cwd.endsWith(sep) ? cwd : cwd + sep
+  return path.startsWith(prefix) ? path.slice(prefix.length) : path
+}
+
+/**
+ * The concise argument fragment a non-execute title shows after the tool
+ * name: the pattern (plus optional scope) for search tools, the model-facing
+ * path for every other path-shaped tool, or undefined when the arguments name
+ * neither (the title then falls back to the bare tool name).
+ */
+function titleArgumentOf(kind: ToolKindName, rawInput: Record<string, unknown>, cwd: string | undefined): string | undefined {
+  if (kind === 'search') {
+    // The host's own search cards read "Glob <pattern> in <path>" — same shape.
+    const pattern = firstStringArg(rawInput, ['pattern', 'query', 'regex'])
+    if (pattern !== undefined) {
+      const scope = firstStringArg(rawInput, ['path'])
+      return scope !== undefined ? `${pattern} in ${scope}` : pattern
+    }
+  }
+  const path = toolPathOf(rawInput)
+  return path !== undefined ? displayPathOf(path, cwd) : undefined
+}
+
 /** Human card title for one tool call (see module header for the rationale). */
-export function toolCallTitle(kind: ToolKindName, name: string, rawInput: unknown): string {
+export function toolCallTitle(kind: ToolKindName, name: string, rawInput: unknown, cwd?: string): string {
   if (kind === 'execute') {
     const command = commandOf(rawInput)?.trim()
     if (command !== undefined && command.length > 0) {
-      return command.length <= EXECUTE_CARD_TITLE_MAX
+      return command.length <= TOOL_CARD_TITLE_MAX
         ? command
-        : `${command.slice(0, EXECUTE_CARD_TITLE_MAX)}…`
+        : `${command.slice(0, TOOL_CARD_TITLE_MAX)}…`
     }
+    return name
   }
-  return name
+  const argument = typeof rawInput === 'object' && rawInput !== null
+    ? titleArgumentOf(kind, rawInput as Record<string, unknown>, cwd)
+    : undefined
+  if (argument === undefined) return name
+  const title = `${name} ${argument}`
+  return title.length <= TOOL_CARD_TITLE_MAX ? title : `${title.slice(0, TOOL_CARD_TITLE_MAX)}…`
 }

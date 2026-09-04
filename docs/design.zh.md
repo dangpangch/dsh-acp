@@ -95,11 +95,16 @@ dsh-acp-interactive **本质上是一个 dsh plugin**（dsh bundle 包，声明
   （completed/failed + content ≤8000 字符截断 / **diff 卡**，见下）。
 - 分类 `toolKindFor`：bash/pwsh→execute、write/edit/str_replace…→edit、
   read/read_image→read、search 系→search、rm/delete 系→delete、其余 other。
-- **execute 卡标题携带具体命令行**（`tool-cards.ts`）：Zed 1.18 把 execute 类
+- **标题自解释**（`tool-cards.ts`）：Zed 1.18 把 execute 类
   当终端卡渲染，头部唯一可见文本是 `title`，且隐藏 rawInput
   （`should_show_raw_input = !is_terminal_tool && …`）；external ACP agent 没
   有真实 Zed terminal，故 `title` = 原样命令（trim、400 字符截断 + `…`），呈
-  现原生 "Run Command" 卡。其余类型保持工具名（参数走 Zed raw-input 展开）。
+  现原生 "Run Command" 卡。title 是每种卡片的 primary text（其余类型的参数
+  只在 raw-input 展开里），故：路径类工具（read/read_image/write/edit/
+  str_replace_editor/rm）标题 = `工具名 + 显示路径`（绝对路径在 cwd 下时显示
+  为 cwd 相对；live/replay 语义一致）；search 类 = `工具名 + pattern`
+  （` in <path>` 作用域可选，与宿主自身搜索卡同款）；其余（todo_write、
+  ask_user_question…）与解析不出参数的调用保持裸工具名。
 - **follow-along locations**（`toolCallLocation`，pi-acp 惯例）：工具参数里的
   `file_path`/`path` 按 cwd 绝对化后进 `tool_call.locations`，Zed 便随卡片实
   时高亮/跳转 agent 正在触碰的文件。行号按参数形状推断：`read` 的 `offset`、
@@ -186,7 +191,7 @@ prompt。diff 卡片与 locations 属于 `tool_call`/`tool_call_update` 的可�
 | 会话历史 | load=resume+回放提交事实；resume=不回放；delete 后 resume → invalidParams |
 | 斜杠目录 | 命令平面 + user-invocable skills；`skill:<name>` 命名、分区保序、变更实时重通告（见 §3.5） |
 | skill 执行 | prompt 归一 `/skill:<name>`→`/name`，tool-skill pre-step 装载（见 §3.2） |
-| 工具卡标题 | execute 卡 title = 具体命令行（见 §3.4） |
+| 工具卡标题 | execute 卡 title = 具体命令行；路径卡 = 工具名+显示路径；search 卡 = 工具名+pattern（见 §3.4） |
 | follow-along | `tool_call.locations`：file_path/path 绝对化 + 行号推断（read offset / view_range / insert+1 / old_string 唯一匹配，见 §3.4） |
 | diff 卡片 | `tool_call_update` 结构化 diff：优先持久 meta.diffs（write/edit hunk），回落参数自描述（str_replace_editor / 新建文件，见 §3.4） |
 | resource 块 | 不声明 embeddedContext，但优雅降级为纯文本（pi-acp 同款，见 §3.2） |
@@ -217,7 +222,8 @@ printf '…' | DSH_HOME=$DSH_HOME dsh --profile acp            # 2 result + exit
 
 1. Custom Agent 线程建立，文本/思考流式可见；
 2. 沙箱权限：写工程内成功、写工程外被拦并弹 Allow once / Reject once；
-3. 工具卡片：execute 卡标题显示具体命令行，有输出/退出码；
+3. 工具卡片：标题自解释（execute 卡显示具体命令行；read/glob/edit 卡显示工
+   具名 + 路径/pattern），有输出/退出码；
 4. follow-along：read/edit 卡片让 Zed 实时高亮 agent 正在看的文件（含行
    号）；编辑卡片渲染真正的 diff 视图（非截断文本）；
 5. 长回答增量流式；
@@ -247,7 +253,7 @@ printf '…' | DSH_HOME=$DSH_HOME dsh --profile acp            # 2 result + exit
 src/bridge/index.ts     插件入口：AgentSideConnection + 会话生命周期 + 事件映射
 src/bridge/catalog.ts   斜杠目录合并（命令平面 + user-invocable skills；纯函数）
 src/bridge/replay.ts    持久历史 → ACP 回放帧（纯函数）
-src/bridge/tool-cards.ts 卡片分类/rawInput/标题/locations/diff（execute 标题=命令；纯函数）
+src/bridge/tool-cards.ts 卡片分类/rawInput/标题/locations/diff（标题自解释：execute=命令、路径类=工具名+路径、search=pattern；纯函数）
 src/bridge/{codec,updates,content,config-options,session-store}.ts  纯映射/builder 模块（§3）
 src/dev-bin.ts          独立 dev/test boot（dsh-base + 本包 patch + presets fixture）
 cordis.patch.yml        bundle 补丁（§2.1）

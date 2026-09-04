@@ -88,7 +88,7 @@ export function replayUpdatesForEvent(
       return [{
         sessionUpdate: 'tool_call',
         toolCallId: String(event.data.callId),
-        title: toolCallTitle(kind, event.data.name, rawInput),
+        title: toolCallTitle(kind, event.data.name, rawInput, context.cwd),
         name: event.data.name,
         kind,
         status: 'pending',
