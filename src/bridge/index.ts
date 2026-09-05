@@ -78,8 +78,10 @@ import {
   assistantThoughtChunk,
   commandsUpdate,
   committedBlockRemainder,
+  elicitationRequestFor,
   foldTodoPlan,
   planUpdate,
+  requestPermissionRequest,
   streamTextDelta,
   toolCallContent,
   toolCallDiffContent,
@@ -617,14 +619,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     }
     const callId = request.callId
     return drainRecord(record).then(() =>
-      conn!.requestPermission({
-        sessionId: record.id,
-        toolCall: { toolCallId: callId },
-        options: [
-          { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
-          { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' },
-        ],
-      }),
+      conn!.requestPermission(requestPermissionRequest(record.id, callId)),
     ).then(({ outcome }) => {
       if (outcome.outcome === 'cancelled') return 'cancelled'
       return outcome.optionId === 'allow-once' ? 'allowed-once' : 'rejected'
@@ -686,14 +681,19 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     if (llm === undefined) return undefined
     try {
       const resolved = await llm.resolveModelInfo(provider, model)
-      if (resolved.reasoning === undefined) return undefined
+      // A RESOLVED model always yields a ModelReasoning — with an empty
+      // efforts list when it declares none — so the request guard can strip
+      // canonical-fallback picks instead of letting the harness reject the
+      // turn (UNSUPPORTED_REASONING_EFFORT). undefined is reserved for a
+      // failed lookup, where support is genuinely unknown.
+      const reasoning = resolved.reasoning
       return {
-        efforts: resolved.reasoning.efforts.map((effort) => ({
+        efforts: (reasoning?.efforts ?? []).map((effort) => ({
           id: effort.id,
           name: effort.name,
           description: effort.description ?? null,
         })),
-        ...(resolved.reasoning.defaultEffort !== undefined ? { defaultEffort: resolved.reasoning.defaultEffort } : {}),
+        ...(reasoning?.defaultEffort !== undefined ? { defaultEffort: reasoning.defaultEffort } : {}),
       }
     } catch (error: unknown) {
       logger.warn(`dsh-acp-interactive: reasoning catalog for ${provider}/${model} failed: ${String(error)}`)
@@ -738,9 +738,14 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     const offered = thoughtLevelOptionOptions(reasoning)
     if (offered.length > 0) {
       // Remember exactly which efforts the current model honors so a stale
-      // pick never reaches request assembly (design §6.3 request guard).
-      record.supportedEfforts = reasoning?.efforts !== undefined
-        ? new Set(reasoning.efforts.map((effort) => effort.id))
+      // pick never reaches request assembly (design §6.3 request guard). A
+      // model that resolved but declares no efforts supports NONE of the
+      // canonical fallback entries — an empty set strips any explicit pick
+      // back to provider/default behavior at prompt time. Only a failed
+      // catalog lookup (reasoning undefined) keeps the pick: unknown, not
+      // unsupported.
+      record.supportedEfforts = reasoning !== undefined
+        ? new Set((reasoning.efforts ?? []).map((effort) => effort.id))
         : undefined
       const currentEffort = currentEffortFor(
         current.reasoningEffort !== undefined ? current.reasoningEffort : undefined,
@@ -1436,37 +1441,10 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     }
     const signal = request.signal
     if (signal !== undefined && signal.aborted) throw new Error('question aborted')
-    const properties: Record<string, Record<string, unknown>> = {}
-    const required: string[] = []
-    const messages: string[] = []
-    for (const item of request.questions) {
-      messages.push(item.question)
-      const base = {
-        title: item.question,
-        ...(item.detail !== undefined && item.detail.length > 0 ? { description: item.detail } : {}),
-      }
-      const options = item.options ?? []
-      if (options.length > 0) {
-        const labels = options.map((option) => option.label)
-        properties[item.id] = item.multiSelect === true
-          ? { type: 'array', items: { type: 'string', enum: labels }, ...base }
-          : { type: 'string', enum: labels, ...base }
-        properties[`${item.id}__other`] = { type: 'string', title: 'Other' }
-      } else {
-        properties[item.id] = { type: 'string', ...base }
-        required.push(item.id)
-      }
-    }
     const callId = askCall.get(record.id)
     let outcome
     try {
-      outcome = await conn.createElicitation({
-        mode: 'form',
-        sessionId: record.id,
-        ...(callId !== undefined ? { toolCallId: callId } : {}),
-        message: messages.join(' '),
-        schema: { type: 'object', properties, required },
-      })
+      outcome = await conn.createElicitation(elicitationRequestFor(request, record.id, callId))
     } finally {
       askCall.delete(record.id)
     }

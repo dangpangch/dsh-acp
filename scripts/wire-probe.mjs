@@ -52,6 +52,9 @@ console.error('wire-probe: booted')
 process.on('SIGTERM', () => process.exit(0))
 process.on('SIGINT', () => process.exit(0))
 process.stdin.resume()
+// Probe-only EOF path: a frame-dump parent closing stdin ends the probe —
+// no graceful teardown needed (isolated DSH_HOME, nothing durable).
+process.stdin.on('end', () => process.exit(0))
 
 // The stub adapter module body. Kept as a template literal so this file stays
 // the single source of truth for the probe's canned model behavior. Declared
@@ -59,6 +62,9 @@ process.stdin.resume()
 function stubAdapterSource() {
   return `
 import { LlmAdapter } from '@deepseek-ai/dsh-llm'
+// Phase 1 writes OUTSIDE the workspace so the approval stack escalates to a
+// real session/request_permission round-trip under the workspace-write preset.
+const OUTSIDE = (process.env.DSH_HOME ?? '/tmp') + '/perm-probe.txt'
 export class StubAdapter extends LlmAdapter {
   providerInfo(provider) { return { id: provider, name: 'Stub' } }
   async listModels() {
@@ -68,19 +74,38 @@ export class StubAdapter extends LlmAdapter {
     return { provider: 'stub', id: model, name: 'stub-model', contextWindow: 128000, inputModalities: ['text'], outputModalities: ['text'] }
   }
   async *stream(options) {
-    const sawResult = options.messages.some((m) => m.content.some((b) => b.type === 'tool-result'))
-    if (!sawResult) {
-      yield { type: 'text-delta', index: 0, text: 'Running bash.\\n' }
-      yield { type: 'tool-call-delta', index: 1, id: 'call-1', name: 'bash', argumentsDelta: JSON.stringify({ command: 'cat hello.txt', description: 'Show file contents' }) }
-      yield { type: 'block-end', index: 0, block: { type: 'text', text: 'Running bash.\\n' } }
-      yield { type: 'block-end', index: 1, block: { type: 'tool-call', id: 'call-1', name: 'bash', arguments: JSON.stringify({ command: 'cat hello.txt', description: 'Show file contents' }) } }
+    const saw = (id) => options.messages.some((m) => m.content.some((b) => b.type === 'tool-result' && b.toolCallId === id))
+    if (!saw('call-1')) {
+      const command = 'touch "' + OUTSIDE + '"'
+      yield { type: 'reasoning-delta', index: 0, text: 'The user wants the probe file written.\\n' }
+      yield { type: 'text-delta', index: 1, text: 'Running bash.\\n' }
+      yield { type: 'tool-call-delta', index: 2, id: 'call-1', name: 'bash', argumentsDelta: JSON.stringify({ command, description: 'Write outside the workspace' }) }
+      yield { type: 'block-end', index: 0, block: { type: 'reasoning', text: 'The user wants the probe file written.\\n' } }
+      yield { type: 'block-end', index: 1, block: { type: 'text', text: 'Running bash.\\n' } }
+      yield { type: 'block-end', index: 2, block: { type: 'tool-call', id: 'call-1', name: 'bash', arguments: JSON.stringify({ command, description: 'Write outside the workspace' }) } }
       yield { type: 'finish', reason: { kind: 'tool-calls' } }
       return
     }
-    const sawRead = options.messages.some((m) => m.content.some((b) => b.type === 'tool-result' && b.toolCallId === 'call-2'))
-    if (!sawRead) {
+    if (!saw('call-2')) {
       yield { type: 'tool-call-delta', index: 0, id: 'call-2', name: 'read', argumentsDelta: JSON.stringify({ file_path: 'hello.txt' }) }
       yield { type: 'block-end', index: 0, block: { type: 'tool-call', id: 'call-2', name: 'read', arguments: JSON.stringify({ file_path: 'hello.txt' }) } }
+      yield { type: 'finish', reason: { kind: 'tool-calls' } }
+      return
+    }
+    if (!saw('call-3')) {
+      const todos = [{ content: 'probe step', status: 'in_progress' }, { content: 'wrap up', status: 'pending' }]
+      yield { type: 'tool-call-delta', index: 0, id: 'call-3', name: 'todo_write', argumentsDelta: JSON.stringify({ todos }) }
+      yield { type: 'block-end', index: 0, block: { type: 'tool-call', id: 'call-3', name: 'todo_write', arguments: JSON.stringify({ todos }) } }
+      yield { type: 'finish', reason: { kind: 'tool-calls' } }
+      return
+    }
+    if (!saw('call-4')) {
+      const questions = [
+        { id: 'proceed', question: 'Proceed with the probe?', options: [{ label: 'Yes' }, { label: 'No' }] },
+        { id: 'extras', question: 'Pick extras', options: [{ label: 'A' }, { label: 'B' }], multi_select: true },
+      ]
+      yield { type: 'tool-call-delta', index: 0, id: 'call-4', name: 'ask_user_question', argumentsDelta: JSON.stringify({ questions }) }
+      yield { type: 'block-end', index: 0, block: { type: 'tool-call', id: 'call-4', name: 'ask_user_question', arguments: JSON.stringify({ questions }) } }
       yield { type: 'finish', reason: { kind: 'tool-calls' } }
       return
     }

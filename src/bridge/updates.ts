@@ -152,3 +152,70 @@ export function foldTodoPlan(events: readonly SessionEvent[]): readonly { conten
   if (current === undefined || current.length === 0) return undefined
   return current
 }
+
+/**
+ * The `session/request_permission` request for one bridge-owned tool call:
+ * allow-once / reject-once, per the design's one-shot permission answerer.
+ */
+export function requestPermissionRequest(sessionId: string, toolCallId: string): {
+  sessionId: string
+  toolCall: { toolCallId: string }
+  options: { optionId: string; name: string; kind: 'allow_once' | 'reject_once' }[]
+} {
+  return {
+    sessionId,
+    toolCall: { toolCallId },
+    options: [
+      { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
+      { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' },
+    ],
+  }
+}
+
+/**
+ * The v1 `elicitation/create` form request for one ask_user_question call:
+ * single-select questions become string enums, multi-select become string
+ * arrays, every option question gains an `__other` free-text sibling, and
+ * option-less questions are required. Field name per the v1 schema:
+ * `requestedSchema` (not the legacy `schema`).
+ */
+export function elicitationRequestFor(
+  request: { questions: readonly { id: string; question: string; detail?: string; options?: readonly { label: string }[]; multiSelect?: boolean }[] },
+  sessionId: string,
+  toolCallId: string | undefined,
+): {
+  mode: 'form'
+  sessionId: string
+  toolCallId?: string
+  message: string
+  requestedSchema: { type: 'object'; properties: Record<string, unknown>; required: string[] }
+} {
+  const properties: Record<string, unknown> = {}
+  const required: string[] = []
+  const messages: string[] = []
+  for (const item of request.questions) {
+    messages.push(item.question)
+    const base = {
+      title: item.question,
+      ...(item.detail !== undefined && item.detail.length > 0 ? { description: item.detail } : {}),
+    }
+    const options = item.options ?? []
+    if (options.length > 0) {
+      const labels = options.map((option) => option.label)
+      properties[item.id] = item.multiSelect === true
+        ? { type: 'array', items: { type: 'string', enum: labels }, ...base }
+        : { type: 'string', enum: labels, ...base }
+      properties[`${item.id}__other`] = { type: 'string', title: 'Other' }
+    } else {
+      properties[item.id] = { type: 'string', ...base }
+      required.push(item.id)
+    }
+  }
+  return {
+    mode: 'form',
+    sessionId,
+    ...(toolCallId !== undefined ? { toolCallId } : {}),
+    message: messages.join(' '),
+    requestedSchema: { type: 'object', properties, required },
+  }
+}
