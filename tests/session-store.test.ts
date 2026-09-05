@@ -1,7 +1,11 @@
-// session-store: single-flight prompt slot + the registry identity guard
-// (design.zh.md §6.2 `teardown-quiescence` primitives).
+// session-store: single-flight prompt slot, the registry identity guard, and
+// the durable model-selection fold (design.zh.md §6.2/§6.3 primitives).
 import { describe, expect, it } from 'vitest'
-import { createInflight, makeRecord, removeRecord, type PromptInflight, type SessionRecord } from '../src/bridge/session-store.js'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import { createInflight, lastModelSelection, makeRecord, removeRecord, type PromptInflight, type SessionRecord } from '../src/bridge/session-store.js'
+
+/** Minimal session event fixture (seq/time are irrelevant to the fold). */
+const event = (type: string, data: unknown): SessionEvent => ({ type, seq: 0, time: 0, data }) as never
 
 describe('removeRecord identity guard', () => {
   const recordFor = (id: string): SessionRecord => makeRecord(
@@ -77,5 +81,33 @@ describe('PromptInflight (one prompt per session)', () => {
     const inflight = createInflight()
     inflight.admissionController.abort(new Error('ACP prompt cancelled'))
     expect(inflight.admissionController.signal.aborted).toBe(true)
+  })
+})
+
+describe('lastModelSelection (durable selection fold)', () => {
+  it('returns undefined for logs without a selection snapshot', () => {
+    expect(lastModelSelection([])).toBeUndefined()
+    expect(lastModelSelection([
+      event('turn/start', { turn: 0 }),
+      event('todo/write', { todos: [] }),
+    ])).toBeUndefined()
+  })
+
+  it('restores the latest snapshot, later writes winning over earlier ones', () => {
+    const restored = lastModelSelection([
+      event('model/selection', { provider: 'deepseek-official', model: 'deepseek-v4-flash' }),
+      event('turn/start', { turn: 0 }),
+      event('model/selection', { provider: 'pi-ai', model: 'claude-x', reasoningEffort: 'off' }),
+    ])
+    expect(restored).toEqual({ provider: 'pi-ai', model: 'claude-x', reasoningEffort: 'off' })
+  })
+
+  it('restores a provider-default snapshot without an effort key', () => {
+    const restored = lastModelSelection([
+      event('model/selection', { provider: 'pi-ai', model: 'claude-x', reasoningEffort: 'off' }),
+      event('model/selection', { provider: 'pi-ai', model: 'claude-x' }),
+    ])
+    expect(restored).toEqual({ provider: 'pi-ai', model: 'claude-x' })
+    expect('reasoningEffort' in restored!).toBe(false)
   })
 })

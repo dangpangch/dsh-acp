@@ -3,8 +3,8 @@
 // cancel admission/agent -> drain ordered updates -> dispose the agent ->
 // flush persistence, scoped to the addressed session only. The registry and
 // inflight state transitions are unit-testable without a harness.
-import type { Agent, AgentHandle, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
-import type { AgentCancelCause, SessionId } from '@deepseek-ai/dsh-session'
+import type { Agent, AgentHandle, ModelSelection, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
+import type { AgentCancelCause, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { AcpStopReason } from './codec.js'
 
 /** One in-flight `session/prompt`: the exact settlement bookkeeping. */
@@ -154,4 +154,25 @@ export function requestStop(record: SessionRecord, cause: AgentCancelCause): voi
     inflight.admissionController.abort(new Error(`ACP ${cause.kind} stop`))
   }
   record.agent.cancel(cause)
+}
+
+/**
+ * The model selection to restore for a reloaded session: the LAST
+ * `acp/model-selection` snapshot in the durable log (later writes win).
+ * Sessions predating the snapshot never carry one — callers then keep their
+ * configured defaults.
+ */
+/**
+ * The model selection to restore for a reloaded session: the LAST
+ * `model/selection` snapshot in the durable log (later writes win). Sessions
+ * predating the snapshot never carry one — callers then keep their configured
+ * defaults.
+ */
+export function lastModelSelection(events: readonly SessionEvent[]): ModelSelection | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]!
+    if (event.type !== 'model/selection') continue
+    return { ...event.data }
+  }
+  return undefined
 }

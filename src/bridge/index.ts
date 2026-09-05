@@ -39,7 +39,7 @@ import {
   type ResumeSessionRequest,
   type SessionNotification,
 } from '@agentclientprotocol/sdk'
-import { installModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
+import { installModelSelection, type ModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, errorChain, ReasoningEffortId, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { Agent, AgentCancelCause } from '@deepseek-ai/dsh-agent'
 // Type-only dependency: registers dsh-user-approval's `approval/request`
@@ -65,6 +65,7 @@ import { settledStopReason, type DshTurnEndKind } from './codec.js'
 import {
   createInflight,
   drainRecord,
+  lastModelSelection,
   makeRecord,
   removeRecord,
   requestStop,
@@ -771,6 +772,18 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     return out
   }
 
+  /**
+   * Commit one validated selection change: update the live ref AND append a
+   * durable snapshot to the session log, so a reloaded session restores the
+   * route (and picked effort) it actually used instead of reverting to the
+   * configured default (design §6.3; the todo/write precedent for log-only
+   * plugin events).
+   */
+  const setSelection = (record: SessionRecord, next: ModelSelection): void => {
+    record.selection.current = next
+    record.agent.session.append('model/selection', next)
+  }
+
   /** Apply one validated config change; takes effect on the next turn. */
   const applyConfigOption = async (record: SessionRecord, configId: string, value: unknown): Promise<void> => {
     const current = record.selection.current
@@ -783,7 +796,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       if (slash <= 0 || slash === value.length - 1) throw invalidParams(`unknown model value: ${value}`)
       // Switching models clears the effort: the new model's provider default
       // governs until the user picks another level.
-      record.selection.current = { provider: value.slice(0, slash), model: value.slice(slash + 1) }
+      setSelection(record, { provider: value.slice(0, slash), model: value.slice(slash + 1) })
       return
     }
     if (configId === CONFIG_ID_THOUGHT_LEVEL) {
@@ -792,10 +805,10 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       if (!offered.some((effort) => effort.id === value)) throw invalidParams(`unknown thought_level value: ${value}`)
       if (value === PROVIDER_DEFAULT_REASONING_EFFORT) {
         const { reasoningEffort: _stripped, ...rest } = current
-        record.selection.current = rest
+        setSelection(record, rest)
         return
       }
-      record.selection.current = { ...current, reasoningEffort: ReasoningEffortId(value) }
+      setSelection(record, { ...current, reasoningEffort: ReasoningEffortId(value) })
       return
     }
     if (configId === CONFIG_ID_PERMISSION) {
@@ -1146,9 +1159,16 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         throw internalError('connection closed during session load/resume')
       }
       const record = makeRecord(sessionId, params.cwd, handle, selection)
-      const configOptions = await registerRecord(record, params.replay && query !== undefined
+      // Restore the session's durable model selection (route + picked effort)
+      // BEFORE config options are built: a reloaded session must advertise the
+      // thought levels of the route it actually used, not silently revert to
+      // the configured default (the pi-acp pattern — the session is the source
+      // of truth). Sessions predating the snapshot keep their defaults.
+      const snapshot = query !== undefined ? await query.readSession(sessionId) : undefined
+      const restored = snapshot !== undefined ? lastModelSelection(snapshot.events) : undefined
+      if (restored !== undefined) selection.current = restored
+      const configOptions = await registerRecord(record, params.replay && snapshot !== undefined
         ? async () => {
-            const snapshot = await query.readSession(sessionId)
             await replayHistory(record, snapshot.events)
           }
         : undefined)
