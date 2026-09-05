@@ -12,13 +12,6 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { TodoItem } from '@deepseek-ai/dsh-tool-todo'
 import { isAbsolute, resolve } from 'node:path'
 
-export type SessionIdLike = string
-
-/** One wire `session/update` notification for a session. */
-export function sessionNotification(sessionId: SessionIdLike, update: SessionNotification['update']): SessionNotification {
-  return { sessionId, update }
-}
-
 /** One committed assistant text block as an `agent_message_chunk`. */
 export function assistantTextChunk(text: string): SessionNotification['update'] {
   return { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } }
@@ -68,7 +61,8 @@ export function commandsUpdate(commands: readonly { name: string; description?: 
 /**
  * Fold one streamed delta onto the per-(turn,step,index) accumulation and
  * return the wire chunk to send. Deltas of one block concatenate; every
- * already-accumulated prefix was delivered, so only the fresh suffix goes out.
+ * already-accumulated prefix was delivered, so the fresh text goes out whole.
+ * An empty delta sends nothing.
  */
 export function streamTextDelta(
   acc: Map<string, string>,
@@ -76,11 +70,9 @@ export function streamTextDelta(
   text: string,
   chunk: (text: string) => SessionNotification['update'],
 ): SessionNotification['update'] | undefined {
-  const prior = acc.get(key) ?? ''
-  const next = prior + text
-  acc.set(key, next)
-  if (next.length === 0 || !next.startsWith(prior)) return undefined
-  return chunk(next.slice(prior.length))
+  if (text.length === 0) return undefined
+  acc.set(key, (acc.get(key) ?? '') + text)
+  return chunk(text)
 }
 
 /**
@@ -111,6 +103,19 @@ export function toolCallContent(text: string): { type: 'content'; content: { typ
   const trimmed = text.length > maxChars ? `${text.slice(0, maxChars)}\n… [truncated]` : text
   if (trimmed.length === 0) return undefined
   return [{ type: 'content', content: { type: 'text', text: trimmed } }]
+}
+
+/**
+ * Wrap text in one markdown code fence, so the client renders it as a
+ * monospace block (Zed renders rawInput strings as markdown verbatim). The
+ * fence grows past any backtick run inside the text, so fence-collision
+ * cannot break the block. Trailing newlines are dropped (the closing fence
+ * replaces them); an empty input stays an honest empty block.
+ */
+export function codeFence(text: string, info = ''): string {
+  const body = text.replace(/\n+$/, '')
+  const fence = '`'.repeat(Math.max(3, ...(body.match(/`+/g) ?? []).map((run) => run.length + 1)))
+  return `${fence}${info}\n${body}\n${fence}`
 }
 
 /**

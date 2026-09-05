@@ -48,13 +48,9 @@ export interface ModelReasoning {
  */
 export function effortOptionsFor(
   reasoning: ModelReasoning | undefined,
-): readonly EffortLevel[] | undefined {
+): readonly EffortLevel[] {
   const declared = reasoning?.efforts
   if (declared !== undefined && declared.length > 0) return declared
-  // Reasoning metadata without efforts only reaches this from a degraded
-  // adapter (upstream rejects it as INVALID_MODEL_REASONING); keep the
-  // canonical fallback for every other case so the picker never disappears.
-  if (reasoning?.defaultEffort !== undefined) return undefined
   return CANONICAL_REASONING_LEVELS
 }
 
@@ -75,7 +71,6 @@ export function thoughtLevelOptionOptions(
   reasoning: ModelReasoning | undefined,
 ): readonly EffortLevel[] {
   const efforts = effortOptionsFor(reasoning)
-  if (efforts === undefined) return []
   if (reasoning?.defaultEffort !== undefined) return efforts
   return [
     { id: PROVIDER_DEFAULT_REASONING_EFFORT, name: 'Provider default', description: null },
@@ -101,17 +96,14 @@ export function guardReasoningEffort<T extends { reasoningEffort?: string }>(
 }
 
 /** Human-readable label for a permission preset key. */
+const PERMISSION_LABELS: Readonly<Record<string, string>> = {
+  'read-only': 'Read only',
+  'workspace-write': 'Workspace write',
+  'danger-full-access': 'Full access',
+}
+
 export function permissionLabel(name: string): string {
-  switch (name) {
-    case 'read-only':
-      return 'Read only'
-    case 'workspace-write':
-      return 'Workspace write'
-    case 'danger-full-access':
-      return 'Full access'
-    default:
-      return name
-  }
+  return PERMISSION_LABELS[name] ?? name
 }
 
 /** Write-permission select options from the preset (or sandbox) names. */

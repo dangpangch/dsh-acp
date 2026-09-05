@@ -13,6 +13,10 @@ node_modules/
 # local agent skills & skill registry lock
 .agents/
 skills-lock.json
+.zcode/
+
+# generated at runtime by scripts/wire-probe.mjs
+scripts/wire-stub-adapter.mjs
 
 # OS / editor junk
 .DS_Store

@@ -79,7 +79,6 @@ import {
   committedBlockRemainder,
   foldTodoPlan,
   planUpdate,
-  sessionNotification,
   streamTextDelta,
   toolCallContent,
   toolCallDiffContent,
@@ -87,7 +86,7 @@ import {
 } from './updates.js'
 import { replayUpdatesForEvent } from './replay.js'
 import { mergeSlashCatalog, normalizeSkillSlashText, type SlashCatalogEntry, type SlashCommandEntry, type SlashSkillEntry } from './catalog.js'
-import { diffForToolCall, rawInputOf, toolCallLocation, toolCallTitle, toolKindFor, toolResultCall } from './tool-cards.js'
+import { diffForToolCall, displayRawInput, rawInputOf, resultBody, toolCallLocation, toolCallTitle, toolKindFor, toolResultCall } from './tool-cards.js'
 import {
   currentEffortFor,
   guardReasoningEffort,
@@ -130,7 +129,7 @@ type WireConfigOptions = NonNullable<NewSessionResponse['configOptions']>
 
 /** Agent-presets roster seam (default-preset join per session, best effort). */
 interface AgentPresetsSeam {
-  resolve(id?: string): Promise<{ readonly id: string }> | { readonly id: string }
+  resolve(): Promise<{ readonly id: string }> | { readonly id: string }
   mount(ctx: unknown, id: string): Promise<unknown>
 }
 
@@ -157,11 +156,6 @@ interface PersistenceSeam {
 /** Write-permission preset seam (permission config option + /permission). */
 interface PermissionPresetsSeam {
   set(session: Session, name: string): void
-}
-
-/** Human question UI seam for elicitation forms (either generation). */
-interface UserQuestionsSeam {
-  ask?(request: unknown): Promise<{ answers: { id: string; selected: string[]; custom?: string }[] }>
 }
 
 /** The projection read face the bridge uses for usage_update (token-meter unit). */
@@ -262,7 +256,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   const query = ctx.get('sessionQuery') as SessionQuerySeam | undefined
   const persistence = ctx.get('sessionPersistence') as PersistenceSeam | undefined
   const permissionPresets = ctx.get('permissionPresets') as PermissionPresetsSeam | undefined
-  const userQuestions = ctx.get('userQuestions') as UserQuestionsSeam | undefined
+  const userQuestions = ctx.get('userQuestions') !== undefined
   const store: SessionRegistry = new Map()
   let closed = false
   let imagePromptEnabled = false
@@ -276,9 +270,9 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   // Tool-call id -> (name, parsed arguments) for the diff card at result time:
   // the `tool/result` event carries only the call id, and the diff source is
   // the call's arguments (str_replace_editor) or its presentation meta
-  // (write/edit hunks). Entries are pruned once the result lands.
-  const toolCallName = new Map<string, string>()
-  const toolCallArguments = new Map<string, unknown>()
+  // (write/edit hunks). Entries are pruned once the result lands. Same
+  // pairing shape the replay path keeps (replay.ts `calls`).
+  const liveCalls = new Map<string, { name: string; rawInput: unknown }>()
   const elicitationFormsEnabled = (): boolean => {
     const capabilities = clientCapabilities as { elicitation?: { form?: unknown } } | undefined
     return capabilities?.elicitation?.form !== undefined
@@ -309,7 +303,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   const deliver = (record: SessionRecord, update: SessionNotification['update']): void => {
     record.outputTail = record.outputTail.then(async () => {
       if (record.closed) return
-      await notify(sessionNotification(record.id, update))
+      await notify({ sessionId: record.id, update })
     }).catch((error: unknown) => {
       const inflight = record.inflight
       if (inflight !== undefined) inflight.outputError ??= new Error(String(error))
@@ -341,7 +335,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       if (kind === undefined) {
         // A slash command that ran without a model turn has no turn/end to
         // correlate; it still settles end_turn once the agent is quiet.
-        inflight.resolve(inflight.noTurnExpected === true ? 'end_turn' : 'cancelled')
+        inflight.resolve(inflight.commandExecuted === true ? 'end_turn' : 'cancelled')
         return
       }
       const stop = settledStopReason(kind)
@@ -386,10 +380,10 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         const key = `${turn}:${step}:${index}`
         if (block.type === 'text') {
           const remainder = committedBlockRemainder(record.streamedText, key, block.text)
-          if (remainder !== undefined) await notify(sessionNotification(record.id, assistantTextChunk(remainder)))
+          if (remainder !== undefined) await notify({ sessionId: record.id, update: assistantTextChunk(remainder) })
         } else if (block.type === 'reasoning') {
           const remainder = committedBlockRemainder(record.streamedReasoning, key, block.text)
-          if (remainder !== undefined) await notify(sessionNotification(record.id, assistantThoughtChunk(remainder)))
+          if (remainder !== undefined) await notify({ sessionId: record.id, update: assistantThoughtChunk(remainder) })
         }
       }
       pushUsage(record)
@@ -426,14 +420,16 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
 
   /** Deliver a generic tool card on call and its terminal update on result. */
   const deliverToolCall = (record: SessionRecord, call: { callId: string; name: string; arguments: string }): void => {
-    const rawInput = rawInputOf(call.arguments)
+    // The title reads the model's own arguments (description); the wire
+    // rawInput is the display form (workdir + command for command runners).
+    const parsed = rawInputOf(call.arguments)
     const kind = toolKindFor(call.name)
     // Follow-along: the location must reach the client while the tool runs,
     // so an `edit`'s line is inferred from the file's CURRENT content (the
     // tool has not executed yet); the sync readText seam makes the read
     // synchronous with the call-time card, and a missing file just drops
     // the line, never the location.
-    const location = toolCallLocation(rawInput, record.cwd, (path) => {
+    const location = toolCallLocation(parsed, record.cwd, (path) => {
       try {
         return readFileSync(path, 'utf8')
       } catch {
@@ -442,16 +438,16 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     })
     serialize(record, async () => {
       if (record.closed || record.replaying) return
-      await notify(sessionNotification(record.id, {
+      await notify({ sessionId: record.id, update: {
         sessionUpdate: 'tool_call',
         toolCallId: call.callId,
-        title: toolCallTitle(kind, call.name, rawInput, record.cwd),
+        title: toolCallTitle(kind, call.name, parsed, record.cwd),
         name: call.name,
         kind,
         status: 'pending',
-        rawInput,
+        rawInput: displayRawInput(call.name, parsed, record.cwd),
         ...(location !== undefined ? { locations: [location] } : {}),
-      }))
+      } })
     })
   }
 
@@ -466,16 +462,16 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       // their arguments (str_replace_editor); the confirmation text rides
       // alongside so diff-less clients degrade to the plain text card.
       const diffs = diffForToolCall(result.name, result.rawInput, result.meta, result.isError)
-      const textContent = toolCallContent(result.text)
+      const textContent = toolCallContent(resultBody(result.name, result.text))
       const content = diffs === undefined
         ? textContent
         : [...toolCallDiffContent(diffs, record.cwd), ...textContent ?? []]
-      await notify(sessionNotification(record.id, {
+      await notify({ sessionId: record.id, update: {
         sessionUpdate: 'tool_call_update',
         toolCallId: result.callId,
         status: result.isError ? 'failed' : 'completed',
         ...(content !== undefined ? { content } : {}),
-      }))
+      } })
       pushUsage(record)
     })
   }
@@ -567,24 +563,23 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         break
       case 'tool/call':
         if (event.data.name === 'ask_user_question') askCall.set(record.id, String(event.data.callId))
-        toolCallName.set(String(event.data.callId), event.data.name)
-        toolCallArguments.set(String(event.data.callId), rawInputOf(event.data.arguments))
+        liveCalls.set(String(event.data.callId), { name: event.data.name, rawInput: rawInputOf(event.data.arguments) })
         deliverToolCall(record, event.data)
         break
       case 'tool/result': {
         const call = toolResultCall(event.data.message)
+        // The diff source pair: the call's arguments (parsed at call time; the
+        // result event carries only the id) and the tool's presentation meta.
+        const source = liveCalls.get(call.callId)
         deliverToolResult(record, {
           callId: call.callId,
           text: call.text,
           isError: event.data.error !== undefined,
-          // The diff source pair: the call's arguments (re-parsed; the result
-          // event carries only the id) and the tool's presentation meta.
-          name: toolCallName.get(call.callId) ?? '',
-          rawInput: toolCallArguments.get(call.callId),
+          name: source?.name ?? '',
+          rawInput: source?.rawInput,
           meta: event.data.meta,
         })
-        toolCallName.delete(call.callId)
-        toolCallArguments.delete(call.callId)
+        liveCalls.delete(call.callId)
         break
       }
       case 'todo/write':
@@ -671,10 +666,20 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   }
 
   // ── config options (P1): model + thought_level selects ────────────────────
-  const defaultSelection = (): { provider?: string; model?: string } => ({
-    ...(config.provider !== undefined ? { provider: config.provider } : {}),
-    ...(config.model !== undefined ? { model: config.model } : {}),
-  })
+  /** Shipped route defaults: a model-selection ref plus the factory options bag. */
+  const routeDefaults = (): {
+    selection: ModelSelectionRef
+    agentOptions: { provider?: string; model?: string } | undefined
+  } => {
+    const selection: ModelSelectionRef = { current: undefined, assembled: undefined }
+    if (config.provider !== undefined && config.model !== undefined) {
+      selection.current = { provider: config.provider, model: config.model }
+    }
+    const agentOptions = config.provider !== undefined || config.model !== undefined
+      ? { provider: config.provider, model: config.model }
+      : undefined
+    return { selection, agentOptions }
+  }
 
   const reasoningFor = async (provider: string, model: string): Promise<ModelReasoning | undefined> => {
     if (llm === undefined) return undefined
@@ -931,7 +936,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     record.replaying = true
     try {
       // Call-id pairing for the result-time diff card, built as the log walks
-      // (the same pairing the live firehose keeps in toolCallName/Arguments).
+      // (the same pairing shape the live firehose keeps in `liveCalls`).
       const calls = new Map<string, { name: string; rawInput: unknown }>()
       for (const event of events) {
         if (record.closed) return
@@ -939,13 +944,13 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
           calls.set(String(event.data.callId), { name: event.data.name, rawInput: rawInputOf(event.data.arguments) })
         }
         for (const update of replayUpdatesForEvent(event, { cwd: record.cwd, calls })) {
-          await notify(sessionNotification(record.id, update))
+          await notify({ sessionId: record.id, update })
         }
       }
       // One final plan state (last todo/write wins; turn/start clears); a log
       // that never rendered a plan gets nothing — replay never fabricates.
       const entries = foldTodoPlan(events)
-      if (entries !== undefined && !record.closed) await notify(sessionNotification(record.id, planUpdate(entries)))
+      if (entries !== undefined && !record.closed) await notify({ sessionId: record.id, update: planUpdate(entries) })
     } finally {
       record.replaying = false
     }
@@ -954,13 +959,9 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   /** One ordered "create-or-resume" agent handle for history loads. */
   const resumeAgentFor = async (
     sessionId: SessionId,
-    selection: ModelSelectionRef,
     agentPreset: string | undefined,
-  ): Promise<Awaited<ReturnType<typeof agents.create>>> => {
-    const defaults = defaultSelection()
-    if (defaults.provider !== undefined && defaults.model !== undefined) {
-      selection.current = { provider: defaults.provider, model: defaults.model }
-    }
+  ): Promise<{ handle: Awaited<ReturnType<typeof agents.create>>; selection: ModelSelectionRef }> => {
+    const { selection, agentOptions } = routeDefaults()
     let presetId = agentPreset
     if (presetId === undefined && presets !== undefined) {
       try {
@@ -969,10 +970,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         logger.warn(`dsh-acp-interactive: default agent preset unavailable: ${errorChain(error)}`)
       }
     }
-    const agentOptions = defaults.provider !== undefined || defaults.model !== undefined
-      ? { provider: defaults.provider, model: defaults.model } as { provider?: string; model?: string }
-      : undefined
-    return agents.resume({
+    const handle = await agents.resume({
       resumeSessionId: sessionId,
       agentOptions,
       setup: async (agentCtx) => {
@@ -982,6 +980,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         }
       },
     })
+    return { handle, selection }
   }
 
   /** Best-effort durable delete of one session artifact (idempotent). */
@@ -1069,14 +1068,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       assertOpen()
       validateWorkspaceParams(params)
       const sessionId = brandSessionId(randomUUID())
-      const defaults = defaultSelection()
-      const selection: ModelSelectionRef = { current: undefined, assembled: undefined }
-      if (defaults.provider !== undefined && defaults.model !== undefined) {
-        selection.current = { provider: defaults.provider, model: defaults.model }
-      }
-      const agentOptions = defaults.provider !== undefined || defaults.model !== undefined
-        ? { provider: defaults.provider, model: defaults.model } as { provider?: string; model?: string }
-        : undefined
+      const { selection, agentOptions } = routeDefaults()
       // Best-effort default-preset join (agent plane tools/prompt sections).
       // The roster (shipped + user roots) is our own bundle's agent-presets
       // row; an absent roster or a default that no root supplies must not
@@ -1148,8 +1140,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         throw invalidParams(`session ${params.sessionId} belongs to ${header.cwd}, not ${params.cwd}`)
       }
       await releaseOnline(sessionId)
-      const selection: ModelSelectionRef = { current: undefined, assembled: undefined }
-      const handle = await resumeAgentFor(sessionId, selection, header.agentPreset)
+      const { handle, selection } = await resumeAgentFor(sessionId, header.agentPreset)
       if (closed) {
         await handle.dispose().catch(() => {})
         throw internalError('connection closed during session load/resume')
@@ -1243,7 +1234,6 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         const line = slashLine(prompt)
         if (line !== undefined) {
           if (commands === undefined) throw internalError('no command runtime is mounted')
-          inflight.noTurnExpected = true
           const exec = await commands.execute(
             record.agent,
             line,
@@ -1255,8 +1245,6 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
             if (exec.result.text !== undefined && exec.result.text.length > 0) {
               deliver(record, assistantTextChunk(exec.result.text))
             }
-          } else {
-            inflight.noTurnExpected = false
           }
         }
         if (inflight.commandExecuted !== true) {
@@ -1413,13 +1401,10 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   // otherwise the answerer rejects immediately so the ask tool reports the
   // failure to the model instead of hanging the turn (design §6.4).
   //
-  // Two seam generations ship in the wild: dsh 0.1.1 exposes a single active
-  // provider through `registerProvider`; 0.1.2 removed it in favor of the
-  // Agent-scoped `user-questions/request` waterfall (an untagged root listener
-  // is admitted for every agent-scoped dispatch, so one bridge listener covers
-  // all sessions and keys by `request.agent` itself). Prefer the waterfall —
-  // it is the forward contract — and fall back to the provider when present so
-  // an older host keeps working unchanged.
+  // dsh 0.1.2 answers questions through the Agent-scoped
+  // `user-questions/request` waterfall (an untagged root listener is admitted
+  // for every agent-scoped dispatch, so one bridge listener covers all
+  // sessions and keys by `request.agent` itself).
   const askViaForm = async (request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer> => {
     const agent = request.agent
     const record = agent !== undefined ? store.get(agent.session.id) : undefined
@@ -1489,25 +1474,17 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   }
 
   if (userQuestions !== undefined) {
-    type LegacyProvider = { ask(request: unknown): Promise<AskUserQuestionAnswer> }
-    const legacy = userQuestions as { registerProvider?: (provider: LegacyProvider) => () => void }
-    const legacyRegister = legacy.registerProvider
-    if (typeof legacyRegister === 'function') {
-      const disposer = legacyRegister.call(userQuestions, { ask: askViaForm })
-      ctx.effect(() => disposer, 'dsh-acp-interactive.user-questions')
-    } else {
-      // Waterfall generation: claim our own sessions' questions and delegate
-      // everything else (`next()`), so a foreign asker still reaches any local
-      // answerer composed elsewhere in the host.
-      ctx.on('user-questions/request' as never, ((
-        request: AskUserQuestionRequest,
-        next: () => Promise<AskUserQuestionAnswer>,
-      ) => {
-        const agent = request.agent
-        const record = agent !== undefined ? store.get(agent.session.id) : undefined
-        if (record === undefined) return next()
-        return askViaForm(request)
-      }) as never)
-    }
+    // Waterfall generation: claim our own sessions' questions and delegate
+    // everything else (`next()`), so a foreign asker still reaches any local
+    // answerer composed elsewhere in the host.
+    ctx.on('user-questions/request' as never, ((
+      request: AskUserQuestionRequest,
+      next: () => Promise<AskUserQuestionAnswer>,
+    ) => {
+      const agent = request.agent
+      const record = agent !== undefined ? store.get(agent.session.id) : undefined
+      if (record === undefined) return next()
+      return askViaForm(request)
+    }) as never)
   }
 }

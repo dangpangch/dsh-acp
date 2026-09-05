@@ -10,9 +10,9 @@ import {
   committedBlockRemainder,
   foldTodoPlan,
   planUpdate,
-  sessionNotification,
   streamTextDelta,
   toolCallContent,
+  codeFence,
   toolCallDiffContent,
   usageUpdate,
 } from '../src/bridge/updates.js'
@@ -23,13 +23,6 @@ function event<T extends keyof SessionEventMap>(type: T, data: SessionEventMap[T
 }
 
 describe('wire builders', () => {
-  it('wraps updates into session/update notifications carrying the session id', () => {
-    expect(sessionNotification('s1', assistantTextChunk('hi'))).toEqual({
-      sessionId: 's1',
-      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hi' } },
-    })
-  })
-
   it('sends committed assistant text as a single text content chunk', () => {
     expect(assistantTextChunk('hello')).toEqual({
       sessionUpdate: 'agent_message_chunk',
@@ -144,6 +137,13 @@ describe('delta streaming (dedupe against committed messages)', () => {
     expect(text.length).toBeLessThan(8_200)
     expect(text.endsWith('… [truncated]')).toBe(true)
     expect(toolCallContent('')).toBeUndefined()
+  })
+
+  it('codeFence wraps output in a fence that outgrows embedded backtick runs', () => {
+    expect(codeFence('hello\n')).toBe('```\nhello\n```')
+    expect(codeFence('')).toBe('```\n\n```')
+    expect(codeFence('has ``` inside\n')).toBe('````\nhas ``` inside\n````')
+    expect(codeFence('ls -la', 'sh')).toBe('```sh\nls -la\n```')
   })
 
   it('diff card content absolutizes paths and omits oldText only for creates', () => {

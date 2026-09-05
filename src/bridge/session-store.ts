@@ -39,8 +39,6 @@ export interface PromptInflight {
   outputError: Error | undefined
   /** First agent failure correlated to this prompt. */
   agentError: Error | undefined
-  /** A slash command that ran without a model turn may end without turn/end. */
-  noTurnExpected: boolean | undefined
   /** Whether a slash command executed (no user message was queued). */
   commandExecuted: boolean | undefined
 }
@@ -111,7 +109,6 @@ export function createInflight(): PromptInflight {
     admissionController: new AbortController(),
     outputError: undefined,
     agentError: undefined,
-    noTurnExpected: undefined,
     commandExecuted: undefined,
   }
 }

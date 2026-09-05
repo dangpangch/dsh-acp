@@ -44,16 +44,18 @@ function basePatchOps() {
 /**
  * Dev-only agent-presets overlay. The dsh CLI profile boot appends the shipped
  * preset root onto the `agent-presets` row itself; a standalone boot must name
- * its own root. Default: the checked-in test fixture copy of the shipped
- * presets (tests/fixtures/presets), overridable with
+ * its own root. Default: the presets shipped inside the installed
+ * @deepseek-ai/dsh-agent-presets package, overridable with
  * DSH_ACP_PRESET_ROOT=<path> so a developer can point at the real deployment
  * root (e.g. the dsh install's config/agent-presets).
  */
 function presetOverlayOps() {
   const env = process.env.DSH_ACP_PRESET_ROOT
+  const require = createRequire(import.meta.url)
+  const defaultPath = dirname(require.resolve('@deepseek-ai/dsh-agent-presets/package.json')) + '/presets'
   const path = env !== undefined && env.length > 0
     ? resolve(env)
-    : resolve(packageRoot(), 'tests/fixtures/presets')
+    : defaultPath
   return [{
     id: 'agent-presets',
     config: {
@@ -84,6 +86,10 @@ async function disposeOnce() {
   await app?.fiber?.dispose()
 }
 
+// EOF race guard: a client that closes stdin while boot is still composing
+// emits `end` before the post-boot listener below is attached — and an
+// unlistened `end` is lost forever, leaving the process hanging with no exit
+// path. Watch for it from the start and drain immediately after boot.
 let stdinEnded = false
 process.stdin.on('end', () => {
   stdinEnded = true

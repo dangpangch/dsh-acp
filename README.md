@@ -111,6 +111,16 @@ sessionId), then exit 0.
   convention: announced as `skill:<name>` (`/skill:find-skills` in the `/`
   popup), commands keep plain names; picking one loads the skill body through
   dsh's `tool-skill` pre-step.
+- Command output display (Zed 1.18): Zed renders execute-kind cards as
+  terminal cards whose text content stays hidden behind a hover-only
+  expander — when the client declares `clientCapabilities.terminal`, each
+  bash/pwsh result is echoed through a client terminal
+  (`terminal/create` → embed `{type:'terminal'}` → `terminal/release`) so the
+  card shows the output like a native Zed terminal card (auto-expanded per
+  `expand_terminal_card`). dsh still runs the command under its own
+  sandbox/approval — the client terminal only displays the captured text.
+  Without the capability (or on any failure) the card falls back to plain
+  text content.
 - Session options: Model, Thought Level, Write permission.
 - Permissions: one-shot `session/request_permission` (allow-once /
   reject-once).
@@ -120,7 +130,9 @@ sessionId), then exit 0.
   `elicitation.form`).
 
 Honestly **not** implemented (never advertised): session fork, delegated
-terminal/fs execution (tools stay in the dsh sandbox), `additionalDirectories`,
+terminal/fs **execution** (tools stay in the dsh sandbox — the client terminal
+above only displays already-captured output, it never runs the agent's
+command), `additionalDirectories`,
 audio/embeddedContext, MCP mounting (non-empty `mcpServers` is rejected with an
 explanation), fine-grained diff cards, Windows.
 

@@ -102,6 +102,12 @@ sessionId），随后 exit 0。
   工程 `.agents/skills`/`.dsh/skills`）。skill 沿用 pi-acp 命名惯例：通告为
   `skill:<name>`（弹窗显示 `/skill:find-skills`），命令保持原名；选中即经
   dsh tool-skill pre-step 装载执行。
+- 命令输出展示（Zed 1.18）：Zed 把 execute 类卡片渲染成终端卡，纯文本 content
+  藏在悬停才出现的展开箭头后面；客户端声明 `clientCapabilities.terminal`
+  时，每条 bash/pwsh 结果通过客户端终端回显（`terminal/create` → 嵌入
+  `{type:'terminal'}` → `terminal/release`），卡片就像原生 Zed 终端卡一样展示
+  输出（按 `expand_terminal_card` 自动展开）。命令仍在 dsh 自己的沙箱/审批层
+  执行——客户端终端只显示已捕获的文本；能力缺失或任何失败一律回落纯文本卡。
 - 会话选项：Model、Thought Level、Write permission。
 - 权限：一次性 `session/request_permission`（allow-once / reject-once）。
 - 认证：`authenticate`（`DEEPSEEK_API_KEY` 或 dsh Web 凭据）；缺 key 时
@@ -109,8 +115,9 @@ sessionId），随后 exit 0。
 - elicitation：`ask_user_question` → ACP 表单（客户端声明 `elicitation.form`
   时）。
 
-明确不做（不悬空声明）：session fork、terminal/fs 执行委托（工具仍在 dsh
-沙箱）、`additionalDirectories`、audio/embeddedContext、MCP 挂载（非空
+明确不做（不悬空声明）：session fork、terminal/fs **执行委托**（工具仍在 dsh
+沙箱——上面的客户端终端只显示已捕获的输出，绝不执行 agent 的命令）、
+`additionalDirectories`、audio/embeddedContext、MCP 挂载（非空
 `mcpServers` 拒绝并说明）、细粒度 diff 卡片、Windows。
 
 ## 开发

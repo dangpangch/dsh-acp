@@ -1,18 +1,21 @@
 // tool-cards: pure tool-card presentation helpers shared by the live and
-// replay paths (design.zh.md §3.4/§6.2). Zed 1.18 renders every
-// execute-kind (bash/pwsh) tool call as a terminal-style card whose header IS
-// the `title` text — it deliberately hides rawInput for execute kind — so the
-// title must carry the concrete command line. The title is the primary card
-// text on every kind (other kinds' arguments hide behind a raw-input
-// disclosure), so path-shaped tools title as "read src/bridge/index.ts" and
-// search tools as "glob src/**/*.ts"; only argument-less tools fall back to
-// the bare name.
+// replay paths (design.zh.md §3.4/§6.2). Zed 1.18 hides the textual content
+// of execute-kind cards behind a hover-only chevron, so command runners
+// (bash/pwsh) present like every other tool: kind `other`, a title carrying
+// the model-written description ("bash show working tree"; the raw command
+// line is the fallback), and the captured output as a collapsed
+// click-to-expand text block. The title is the primary card text on every
+// kind, so path-shaped tools title as "read src/bridge/index.ts" and search
+// tools as "glob src/**/*.ts"; only argument-less tools fall back to the
+// bare name.
 import { describe, expect, it } from 'vitest'
 import {
   TOOL_CARD_TITLE_MAX,
   diffForToolCall,
+  displayRawInput,
   fileDiffsFromMeta,
   rawInputOf,
+  resultCardText,
   toolCallLocation,
   toolCallTitle,
   toolKindFor,
@@ -20,9 +23,9 @@ import {
 } from '../src/bridge/tool-cards.js'
 
 describe('toolKindFor', () => {
-  it('classifies command runners as execute', () => {
-    expect(toolKindFor('bash')).toBe('execute')
-    expect(toolKindFor('pwsh')).toBe('execute')
+  it('classifies command runners as other (read-style fold-out cards)', () => {
+    expect(toolKindFor('bash')).toBe('other')
+    expect(toolKindFor('pwsh')).toBe('other')
   })
 
   it('classifies file tools by their coarse family', () => {
@@ -43,36 +46,40 @@ describe('toolKindFor', () => {
 })
 
 describe('toolCallTitle', () => {
-  it('carries the concrete command on execute-kind cards', () => {
-    expect(toolCallTitle('execute', 'bash', { command: 'git status --short' })).toBe('git status --short')
-    expect(toolCallTitle('execute', 'pwsh', { command: 'Get-ChildItem' })).toBe('Get-ChildItem')
+  it('titles command cards from the model-written description, falling back to the command', () => {
+    expect(toolCallTitle('other', 'bash', { command: 'git status --short', description: 'show working tree' }))
+      .toBe('bash show working tree')
+    expect(toolCallTitle('other', 'pwsh', { command: 'Get-ChildItem', description: 'list files' }))
+      .toBe('pwsh list files')
+    expect(toolCallTitle('other', 'bash', { command: 'git status --short' })).toBe('bash git status --short')
   })
 
   it('trims insignificant shell whitespace around the command', () => {
-    expect(toolCallTitle('execute', 'bash', { command: '  npm test  ' })).toBe('npm test')
-    expect(toolCallTitle('execute', 'bash', { command: '\n\ngit log -1\n' })).toBe('git log -1')
+    expect(toolCallTitle('other', 'bash', { command: '  npm test  ' })).toBe('bash npm test')
+    expect(toolCallTitle('other', 'bash', { command: '\n\ngit log -1\n' })).toBe('bash git log -1')
   })
 
   it('keeps real multi-line commands intact', () => {
     const script = 'git add -A\ngit commit -m "wip"'
-    expect(toolCallTitle('execute', 'bash', { command: script })).toBe(script)
+    expect(toolCallTitle('other', 'bash', { command: script })).toBe(`bash ${script}`)
   })
 
   it('truncates pathological commands with an ellipsis', () => {
     const long = 'x'.repeat(TOOL_CARD_TITLE_MAX + 50)
-    const title = toolCallTitle('execute', 'bash', { command: long })
+    const title = toolCallTitle('other', 'bash', { command: long })
     expect(title.length).toBe(TOOL_CARD_TITLE_MAX + 1)
     expect(title.endsWith('…')).toBe(true)
-    expect(title.slice(0, TOOL_CARD_TITLE_MAX)).toBe(long.slice(0, TOOL_CARD_TITLE_MAX))
+    expect(title.slice(0, TOOL_CARD_TITLE_MAX)).toBe(`bash ${long.slice(0, TOOL_CARD_TITLE_MAX - 5)}`)
   })
 
   it('falls back to the tool name when no command is present', () => {
-    expect(toolCallTitle('execute', 'bash', {})).toBe('bash')
-    expect(toolCallTitle('execute', 'bash', { cwd: '/tmp' })).toBe('bash')
-    expect(toolCallTitle('execute', 'bash', { command: '' })).toBe('bash')
-    expect(toolCallTitle('execute', 'bash', { command: 42 })).toBe('bash')
-    expect(toolCallTitle('execute', 'bash', 'not-json')).toBe('bash')
-    expect(toolCallTitle('execute', 'bash', undefined)).toBe('bash')
+    expect(toolCallTitle('other', 'bash', {})).toBe('bash')
+    expect(toolCallTitle('other', 'bash', { cwd: '/tmp' })).toBe('bash')
+    expect(toolCallTitle('other', 'bash', { description: '   ' })).toBe('bash')
+    expect(toolCallTitle('other', 'bash', { command: '' })).toBe('bash')
+    expect(toolCallTitle('other', 'bash', { command: 42 })).toBe('bash')
+    expect(toolCallTitle('other', 'bash', 'not-json')).toBe('bash')
+    expect(toolCallTitle('other', 'bash', undefined)).toBe('bash')
   })
 
   it('names the model-facing path on path-shaped cards, relative under the cwd', () => {
@@ -95,17 +102,18 @@ describe('toolCallTitle', () => {
   it('titles search cards with the pattern and optional scope', () => {
     expect(toolCallTitle('search', 'glob', { pattern: 'src/**/*.ts' }, '/ws')).toBe('glob src/**/*.ts')
     expect(toolCallTitle('search', 'grep', { pattern: 'TODO', path: 'src' }, '/ws')).toBe('grep TODO in src')
-    // A scoped search without a pattern still names its scope; no nameable
-    // argument at all falls back to the bare tool name.
+    // A scoped search without a pattern still names its scope; a command-only
+    // search names its command; no nameable argument at all falls back to the
+    // bare tool name.
     expect(toolCallTitle('search', 'glob', { path: 'src' }, '/ws')).toBe('glob src')
-    expect(toolCallTitle('search', 'grep', { command: 'git status' }, '/ws')).toBe('grep')
+    expect(toolCallTitle('search', 'grep', { command: 'git status' }, '/ws')).toBe('grep git status')
   })
 
   it('keeps the bare tool name when the arguments name nothing', () => {
     expect(toolCallTitle('read', 'read', {}, '/ws')).toBe('read')
     expect(toolCallTitle('read', 'read', 'not-json', '/ws')).toBe('read')
     expect(toolCallTitle('read', 'read', undefined)).toBe('read')
-    expect(toolCallTitle('other', 'ask_user_question', { command: 'echo hi' }, '/ws')).toBe('ask_user_question')
+    expect(toolCallTitle('other', 'ask_user_question', { command: 'echo hi' }, '/ws')).toBe('ask_user_question echo hi')
     expect(toolCallTitle('other', 'todo_write', { todos: [{ content: 'x' }] }, '/ws')).toBe('todo_write')
   })
 
@@ -124,6 +132,32 @@ describe('rawInputOf', () => {
 
   it('keeps unparsable arguments verbatim', () => {
     expect(rawInputOf('nope')).toBe('nope')
+  })
+})
+
+describe('displayRawInput', () => {
+  it('renders command runners as a shell-prompt code fence (execute-card look)', () => {
+    expect(displayRawInput('bash', { command: 'cat hello.txt', description: 'Show file contents' }, '/ws'))
+      .toBe('```sh\n/ws $ cat hello.txt\n```')
+  })
+
+  it('renders nameable non-command arguments as a pseudo-command fence with window extras', () => {
+    expect(displayRawInput('read', { file_path: 'src/a.ts', offset: 4, limit: 10 }, '/ws'))
+      .toBe('```\nread src/a.ts offset=4 limit=10\n```')
+    expect(displayRawInput('glob', { pattern: 'src/**/*.ts', path: 'src' }, '/ws'))
+      .toBe('```\nglob src/**/*.ts in src\n```')
+    expect(displayRawInput('str_replace_editor', { command: 'insert', path: 'a.ts', insert_line: 4, new_str: 'x' }, '/ws'))
+      .toBe('```\nstr_replace_editor a.ts insert_line=4\n```')
+  })
+
+  it('passes unnameable or unparsable arguments through verbatim', () => {
+    expect(displayRawInput('todo_write', { todos: [{ content: 'x' }] }, '/ws'))
+      .toEqual({ todos: [{ content: 'x' }] })
+    expect(displayRawInput('bash', { cwd: '/tmp' }, '/ws')).toEqual({ cwd: '/tmp' })
+  })
+
+  it('names a description-only command call from its description (like the title)', () => {
+    expect(displayRawInput('bash', { command: '', description: 'x' }, '/ws')).toBe('```\nbash x\n```')
   })
 })
 
@@ -159,6 +193,18 @@ describe('toolCallLocation (follow-along)', () => {
     expect(toolCallLocation({ pattern: 'foo' }, '/ws')).toBeUndefined()
     expect(toolCallLocation('not-json', '/ws')).toBeUndefined()
     expect(toolCallLocation({ file_path: '' }, '/ws')).toBeUndefined()
+  })
+})
+
+describe('resultCardText', () => {
+  it('keeps only the <content> body of a read result envelope', () => {
+    const envelope = '<path>/ws/a.ts</path>\n<type>file</type>\n<content>\n1: hello\n2: world\n\n(Showing lines 1-2 of 2.)\n</content>'
+    expect(resultCardText('read', envelope)).toBe('1: hello\n2: world\n\n(Showing lines 1-2 of 2.)')
+  })
+
+  it('passes through non-read results and read shapes without a content envelope', () => {
+    expect(resultCardText('bash', 'hello')).toBe('hello')
+    expect(resultCardText('read', 'no envelope here')).toBe('no envelope here')
   })
 })
 

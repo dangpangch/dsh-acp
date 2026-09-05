@@ -120,15 +120,15 @@ describe('replayUpdatesForEvent', () => {
     expect(updates[0]).toMatchObject({
       sessionUpdate: 'tool_call',
       toolCallId: 'call-1',
-      title: 'ls',
+      title: 'bash ls',
       name: 'bash',
-      kind: 'execute',
+      kind: 'other',
       status: 'pending',
-      rawInput: { command: 'ls' },
+      rawInput: '```sh\n/ws $ ls\n```',
     })
   })
 
-  it('carries the concrete command in the execute-card title (bash card body)', () => {
+  it('carries the concrete command in the bash card title (read-style fold-out)', () => {
     const updates = replayUpdatesForEvent(event('tool/call', {
       turn: 0,
       step: 0,
@@ -136,7 +136,7 @@ describe('replayUpdatesForEvent', () => {
       name: 'bash',
       arguments: JSON.stringify({ command: 'git status --short' }),
     }), ctx)
-    expect(updates[0]).toMatchObject({ sessionUpdate: 'tool_call', title: 'git status --short', kind: 'execute' })
+    expect(updates[0]).toMatchObject({ sessionUpdate: 'tool_call', title: 'bash git status --short', kind: 'other' })
   })
 
   it('follows along with an absolute location for file tools (read window line)', () => {
@@ -174,7 +174,7 @@ describe('replayUpdatesForEvent', () => {
       sessionUpdate: 'tool_call_update',
       toolCallId: 'call-1',
       status: 'completed',
-      content: [{ type: 'content', content: { type: 'text', text: 'result' } }],
+      content: [{ type: 'content', content: { type: 'text', text: '```\nresult\n```' } }],
     })
     const failed = updatesFor(event('tool/result', {
       turn: 0,
@@ -183,6 +183,32 @@ describe('replayUpdatesForEvent', () => {
       error: { name: 'E', code: 'X' },
     }))
     expect(failed[0]).toMatchObject({ sessionUpdate: 'tool_call_update', toolCallId: 'call-2', status: 'failed' })
+  })
+
+  it('fences tool-run output for command and read tools alike', () => {
+    const bash = replay([event('tool/call', {
+      turn: 0, step: 0, callId: 'c1', name: 'bash',
+      arguments: JSON.stringify({ command: 'cat hello.txt', description: 'Show file contents' }),
+    })])
+    const bashUpdates = bash.updatesFor(event('tool/result', {
+      turn: 0, step: 0,
+      message: { content: [{ type: 'tool-result', toolCallId: 'c1', content: [{ type: 'text', text: 'hello\n' }] }] },
+    }))
+    expect(bashUpdates[0]).toMatchObject({
+      content: [{ type: 'content', content: { type: 'text', text: '```\nhello\n```' } }],
+    })
+
+    const read = replay([event('tool/call', {
+      turn: 0, step: 0, callId: 'c2', name: 'read',
+      arguments: JSON.stringify({ file_path: 'a.ts' }),
+    })])
+    const readUpdates = read.updatesFor(event('tool/result', {
+      turn: 0, step: 0,
+      message: { content: [{ type: 'tool-result', toolCallId: 'c2', content: [{ type: 'text', text: '<path>/ws/a.ts</path>\n<type>file</type>\n<content>\nplain\n</content>' }] }] },
+    }))
+    expect(readUpdates[0]).toMatchObject({
+      content: [{ type: 'content', content: { type: 'text', text: '```\nplain\n```' } }],
+    })
   })
 
   it('renders a structured diff card from the persisted result meta (edit hunks)', () => {
@@ -205,7 +231,7 @@ describe('replayUpdatesForEvent', () => {
       status: 'completed',
       content: [
         { type: 'diff', path: '/ws/src/b.ts', oldText: 'ctx\na\n', newText: 'ctx\nb\n' },
-        { type: 'content', content: { type: 'text', text: 'done' } },
+        { type: 'content', content: { type: 'text', text: '```\ndone\n```' } },
       ],
     })
     expect(calls.view.calls.get('call-5')).toEqual({ name: 'edit', rawInput: { file_path: 'src/b.ts', old_string: 'a', new_string: 'b' } })
@@ -227,7 +253,7 @@ describe('replayUpdatesForEvent', () => {
     expect(updates[0]).toMatchObject({
       content: [
         { type: 'diff', path: '/ws/new.ts', newText: 'hi' }, // no oldText on a create
-        { type: 'content', content: { type: 'text', text: 'created' } },
+        { type: 'content', content: { type: 'text', text: '```\ncreated\n```' } },
       ],
     })
   })

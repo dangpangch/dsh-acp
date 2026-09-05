@@ -5,3 +5,13 @@ allowBuilds:
   koffi: true
   node-pty: true
   protobufjs: true
+# The bridge boots the full dsh composition standalone (dev-bin, probes):
+# bundle patch rows and preset rows import @deepseek-ai/* packages that are
+# only transitive deps (of dsh-base/dsh-agent), and the loader anchors those
+# imports at this package's own files. pnpm's default hoisting hides them in
+# node_modules/.pnpm/node_modules, which only .pnpm-internal modules reach.
+# Public-hoist the dsh stack to the repo root so every anchor resolves —
+# mirroring the flat install a deployed dsh profile gets.
+publicHoistPattern:
+  - '@deepseek-ai/*'
+  - 'cordis-plugin-*'

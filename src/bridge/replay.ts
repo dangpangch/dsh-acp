@@ -16,7 +16,7 @@
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { SessionNotification } from '@agentclientprotocol/sdk'
 import { assistantTextChunk, assistantThoughtChunk, foldTodoPlan, planUpdate, toolCallContent, toolCallDiffContent, userMessageChunk } from './updates.js'
-import { diffForToolCall, rawInputOf, toolCallLocation, toolCallTitle, toolKindFor, toolResultCall } from './tool-cards.js'
+import { diffForToolCall, displayRawInput, rawInputOf, resultBody, toolCallLocation, toolCallTitle, toolKindFor, toolResultCall } from './tool-cards.js'
 /** Replay context per call id: the pairing a live session keeps in the firehose. */
 interface ReplayCall {
   name: string
@@ -92,7 +92,7 @@ export function replayUpdatesForEvent(
         name: event.data.name,
         kind,
         status: 'pending',
-        rawInput,
+        rawInput: displayRawInput(event.data.name, rawInput, context.cwd),
         ...(location !== undefined ? { locations: [location] } : {}),
       }]
     }
@@ -102,7 +102,7 @@ export function replayUpdatesForEvent(
       const isError = event.data.error !== undefined
       const call = context.calls.get(callId)
       const diffs = diffForToolCall(call?.name ?? '', call?.rawInput, event.data.meta, isError)
-      const textContent = toolCallContent(text)
+      const textContent = toolCallContent(resultBody(call?.name ?? '', text))
       const content = diffs === undefined
         ? textContent
         : [...toolCallDiffContent(diffs, context.cwd), ...textContent ?? []]

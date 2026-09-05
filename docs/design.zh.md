@@ -93,18 +93,35 @@ dsh-acp-interactive **本质上是一个 dsh plugin**（dsh bundle 包，声明
 - `tool/call` → `session_update: tool_call`（toolCallId/kind/status/title/
   name/rawInput/**locations**）；`tool/result` → `tool_call_update`
   （completed/failed + content ≤8000 字符截断 / **diff 卡**，见下）。
-- 分类 `toolKindFor`：bash/pwsh→execute、write/edit/str_replace…→edit、
-  read/read_image→read、search 系→search、rm/delete 系→delete、其余 other。
-- **标题自解释**（`tool-cards.ts`）：Zed 1.18 把 execute 类
-  当终端卡渲染，头部唯一可见文本是 `title`，且隐藏 rawInput
-  （`should_show_raw_input = !is_terminal_tool && …`）；external ACP agent 没
-  有真实 Zed terminal，故 `title` = 原样命令（trim、400 字符截断 + `…`），呈
-  现原生 "Run Command" 卡。title 是每种卡片的 primary text（其余类型的参数
-  只在 raw-input 展开里），故：路径类工具（read/read_image/write/edit/
-  str_replace_editor/rm）标题 = `工具名 + 显示路径`（绝对路径在 cwd 下时显示
-  为 cwd 相对；live/replay 语义一致）；search 类 = `工具名 + pattern`
-  （` in <path>` 作用域可选，与宿主自身搜索卡同款）；其余（todo_write、
-  ask_user_question…）与解析不出参数的调用保持裸工具名。
+- 分类 `toolKindFor`：write/edit/str_replace…→edit、read/read_image→read、
+  search 系→search、rm/delete 系→delete、其余（含 bash/pwsh）other。
+- **标题自解释**（`tool-cards.ts`）：title 是每种卡片的 primary text，故
+  命令类工具（bash/pwsh）标题 = `工具名 + description`（模型写的摘要，
+  缺省回落命令行；400 字符截断 + `…`），与路径类同构；路径类工具
+  （read/read_image/write/edit/str_replace_editor/rm）标题 = `工具名 +
+  显示路径`（绝对路径在 cwd 下时显示为 cwd 相对；live/replay 语义一致）；
+  search 类 = `工具名 + pattern`（` in <path>` 作用域可选，与宿主自身搜索
+  卡同款）；其余（todo_write、ask_user_question…）与解析不出参数的调用
+  保持裸工具名。
+- **bash 卡 read 化**（取代早期 terminal-echo 方案）：Zed 1.18 把
+  `kind: execute` 卡渲染成终端式卡片，其文本 content 藏在一个没有任何事件
+  会置位的 `is_open` 折叠后面（悬停才出现箭头），外部 agent 的输出实际不可
+  见；曾用 `terminal/create` 内嵌客户端终端修复（terminal-echo），但终态卡
+  默认自动展开、形态与其它工具割裂。现改为 bash/pwsh 不再标记 execute：
+  标题即 `工具名 + description`（缺省回落命令行），输出以代码围栏包裹
+  （`codeFence`，防围栏碰撞）作为普通文本 content 随 `tool_call_update`
+  发出（≤8000 字符截断）——所有工具的输出统一围栏，Zed 按非 execute 卡
+  渲染成默认折叠、点击展开的代码块，展开即见完整输出；read 结果先经
+  `resultCardText` 只保留 `<content>` 标签正文（`<path>/<type>` 头部为卡片
+  噪音，路径已在标题与 locations 里），无信封形状时原样透传。dsh 仍在自己
+  的 sandbox/审批层执行命令，卡片只是展示已捕获的字节。
+- **rawInput 展示形**（`displayRawInput`，live/replay 共用）：Zed 对
+  字符串 rawInput 按 markdown 原样渲染（对象才包 JSON 围栏），故有可命名
+  参数的工具都发围栏字符串：命令工具 = ```` ```sh ```` 的
+  `<workdir> $ <command>`（execute 卡观感）；其余 = `<工具名> <路径|pattern>
+  [offset=… limit=… …]`（与标题同源的参数片段 + 标题丢弃的窗口小参数）；
+  参数命名不出任何东西的（todo_write、ask_user_question…）与解析失败的
+  原样透传。标题的 description / diff 卡的 diff 源仍取自原始参数。
 - **follow-along locations**（`toolCallLocation`，pi-acp 惯例）：工具参数里的
   `file_path`/`path` 按 cwd 绝对化后进 `tool_call.locations`，Zed 便随卡片实
   时高亮/跳转 agent 正在触碰的文件。行号按参数形状推断：`read` 的 `offset`、
@@ -206,8 +223,9 @@ prompt。diff 卡片与 locations 属于 `tool_call`/`tool_call_update` 的可�
 
 ```bash
 pnpm typecheck && pnpm build          # tsc --noEmit；tsdown -> lib/
-pnpm test                             # vitest（104 项；含真实 spawn 的帧纯净与会话历史探针）
+pnpm test                             # vitest（117 项；含真实 spawn 的帧纯净与会话历史探针）
 node scripts/history-probe.mjs        # 会话历史端到端（隔离 DSH_HOME）
+node scripts/wire-drive.mjs           # stub-LLM wire 探针：execute 卡终端回显 + 回退路径（隔离 DSH_HOME）
 # dev boot smoke（隔离 DSH_HOME）
 printf '…initialize…\n…session/new…' | node lib/dev-bin.js   # 2 result + exit 0
 # CLI profile smoke（隔离 DSH_HOME）
@@ -243,6 +261,7 @@ printf '…' | DSH_HOME=$DSH_HOME dsh --profile acp            # 2 result + exit
 | stdout 出现非 JSON 行 | 违反不变量 → 报告（launcher 不应写 stdout） |
 | 进程秒退 | 看 stderr（多为组合/预设问题）；`dsh --profile acp </dev/null` 应 exit 0 |
 | 工具卡只有工具名、没有命令 | 旧构建：`pnpm build` 后重启线程（execute 卡标题=命令） |
+| 执行卡看不到命令输出 | 展开卡片的内容块即可（bash 卡已 read 化，输出随卡折叠；旧构建先 `pnpm build`） |
 | 工具卡不带文件定位/没有 diff 视图 | 旧构建：`pnpm build` 后重启线程（locations/diff 卡随 §3.4 新增） |
 | `/` 无 skill | skill 需 user-invocable 且位于 dsh 扫描根；装/删后本会话实时刷新 |
 | `/skill:名` 不生效 | 看是否出现 `Load skill …` 工具卡（归一化→pre-step 装载路径） |
@@ -253,9 +272,10 @@ printf '…' | DSH_HOME=$DSH_HOME dsh --profile acp            # 2 result + exit
 src/bridge/index.ts     插件入口：AgentSideConnection + 会话生命周期 + 事件映射
 src/bridge/catalog.ts   斜杠目录合并（命令平面 + user-invocable skills；纯函数）
 src/bridge/replay.ts    持久历史 → ACP 回放帧（纯函数）
-src/bridge/tool-cards.ts 卡片分类/rawInput/标题/locations/diff（标题自解释：execute=命令、路径类=工具名+路径、search=pattern；纯函数）
+src/bridge/tool-cards.ts 卡片分类/rawInput/标题/locations/diff（标题自解释：bash=工具名+description、路径类=工具名+路径、search=pattern；纯函数）
 src/bridge/{codec,updates,content,config-options,session-store}.ts  纯映射/builder 模块（§3）
 src/dev-bin.ts          独立 dev/test boot（dsh-base + 本包 patch + presets fixture）
 cordis.patch.yml        bundle 补丁（§2.1）
 scripts/history-probe.mjs  会话历史端到端探针
+scripts/wire-drive.mjs     stub-LLM wire 探针（wire-probe.mjs 引导 + acp-client 驱动；验证 bash 卡的标题与文本输出帧）
 ```

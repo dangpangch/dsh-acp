@@ -48,13 +48,13 @@ describe('modelSelectOptionList (flat provider/model pairs)', () => {
 
 describe('effort pickers (thinking-modes semantics)', () => {
   it('uses the model-declared efforts verbatim when present', () => {
-    expect(effortOptionsFor(REASONING)?.map((e) => e.id)).toEqual(['off', 'medium'])
+    expect(effortOptionsFor(REASONING).map((e) => e.id)).toEqual(['off', 'medium'])
   })
 
   it('falls back to the canonical level table when the model exposes no reasoning metadata', () => {
     const fallback = effortOptionsFor(undefined)
-    expect(fallback?.map((e) => e.id)).toContain('off')
-    expect(fallback?.map((e) => e.id)).toContain('max')
+    expect(fallback.map((e) => e.id)).toContain('off')
+    expect(fallback.map((e) => e.id)).toContain('max')
   })
 
   it('prepends the display-only provider-default entry only when no default effort is declared', () => {

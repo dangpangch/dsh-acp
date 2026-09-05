@@ -5,19 +5,19 @@
 // §6.2).
 //
 // ACP kind classification: coarse `ToolKind` choice drives the client's icon
-// AND its layout. Zed 1.18 treats every execute-kind call as a terminal tool:
-// the card header renders the `title` field as the command and deliberately
-// hides `rawInput` (thread_view.rs `should_show_raw_input =
-// !is_terminal_tool && !is_edit && …`). An external agent has no real Zed
-// terminal, so the ONLY visible text for a `bash` call is the title we send —
-// a bare tool name reads as "bash" with no command at all. The title of an
-// execute-kind card therefore carries the concrete command line itself, like a
-// native Zed terminal card. The title is the card's primary text on every
-// kind (SDK: "Human-readable title describing what the tool is doing"), and
-// Zed only shows the other kinds' arguments behind a raw-input disclosure — so
-// path-shaped tools title as "read src/bridge/index.ts", search tools as
-// "glob src/**/*.ts", and only argument-less tools fall back to the bare name.
+// AND its layout. Zed 1.18 renders `kind: execute` cards as terminal-style
+// cards whose textual content sits behind a hover-only chevron (an external
+// agent cannot set the card's is_open flag), while non-execute kinds render
+// the title plus a collapsed, click-to-expand content block. Execute cards
+// therefore present like every other tool: the title carries the model-written
+// command description ("bash Show file contents", mirroring "read
+// src/bridge/index.ts"; the raw command line is the fallback and stays in
+// rawInput), and the captured output rides as plain text content that folds
+// away. The title is the card's primary text on every kind (SDK:
+// "Human-readable title describing what the tool is doing"); only
+// argument-less tools fall back to the bare name.
 import { isAbsolute, resolve, sep } from 'node:path'
+import { codeFence } from './updates.js'
 
 /** First tool-result call id + concatenated visible text of one result message. */
 export function toolResultCall(message: {
@@ -44,12 +44,66 @@ export type ToolKindName = 'execute' | 'edit' | 'search' | 'read' | 'delete' | '
 
 /** Coarse ACP tool-kind classification for the generic card icon. */
 export function toolKindFor(name: string): ToolKindName {
-  if (name === 'bash' || name === 'pwsh') return 'execute'
   if (name === 'write' || name === 'edit' || name === 'str_replace' || name === 'str_replace_editor') return 'edit'
   if (name === 'read_image' || name === 'read') return 'read'
   if (name.startsWith('search') || name === 'grep' || name === 'glob' || name === 'fs_search') return 'search'
   if (name.includes('delete') || name === 'rm') return 'delete'
   return 'other'
+}
+
+/**
+ * Command-runner tools: their result text is captured process output (not a
+ * tool-authored confirmation), so the expanded card fences it as a code block.
+ */
+export function isCommandTool(name: string): boolean {
+  return name === 'bash' || name === 'pwsh'
+}
+
+/**
+ * The card body of one tool result. A `read` result carries a
+ * `<path>/<type>/<content>` envelope whose header lines are card noise (the
+ * path already shows in the title and the follow-along location) — keep only
+ * the `<content>` body. Any other shape passes through unchanged.
+ */
+export function resultCardText(name: string, text: string): string {
+  if (name !== 'read') return text
+  const match = /<content>\n?([\s\S]*?)\n?<\/content>/.exec(text)
+  return match === null ? text : match[1]!
+}
+
+/**
+ * The fenced card body of one tool result: extract the display text
+ * (`resultCardText`) and wrap it in a code fence. Empty results stay empty —
+ * an invisible tool result must not turn into an empty code block.
+ */
+export function resultBody(name: string, text: string): string {
+  const extracted = resultCardText(name, text)
+  return extracted.length === 0 ? extracted : codeFence(extracted)
+}
+
+/**
+ * The rawInput a card displays. Zed renders a string rawInput as markdown
+ * verbatim (object rawInput becomes a JSON block), so every tool with a
+ * nameable argument gets a monospace pseudo-command line:
+ * `<workdir> $ <command>` for command runners (execute-card look), and
+ * `<tool> <path|pattern> [key=value …]` for every other tool that names
+ * something (mirroring the title fragment, plus the small numeric window
+ * arguments the title drops). Tools whose arguments name nothing (todo_write,
+ * ask_user_question…) pass their parsed arguments through verbatim.
+ */
+export function displayRawInput(name: string, rawInput: unknown, cwd: string): unknown {
+  const command = (typeof rawInput === 'string' ? rawInput : commandOf(rawInput))?.trim()
+  if (isCommandTool(name) && command !== undefined && command.length > 0) {
+    return codeFence(`${cwd} $ ${command}`, 'sh')
+  }
+  if (typeof rawInput !== 'object' || rawInput === null) return rawInput
+  const record = rawInput as Record<string, unknown>
+  const fragment = titleArgumentOf(toolKindFor(name), record, cwd)
+  if (fragment === undefined) return rawInput
+  const extras = ['offset', 'limit', 'view_range', 'insert_line']
+    .filter((key) => record[key] !== undefined)
+    .map((key) => `${key}=${JSON.stringify(record[key])}`)
+  return codeFence([name, fragment, ...extras].join(' '))
 }
 
 /** Raw tool-argument JSON as displayed input (unparsable stays verbatim). */
@@ -256,10 +310,14 @@ function displayPathOf(path: string, cwd: string | undefined): string {
 }
 
 /**
- * The concise argument fragment a non-execute title shows after the tool
- * name: the pattern (plus optional scope) for search tools, the model-facing
- * path for every other path-shaped tool, or undefined when the arguments name
- * neither (the title then falls back to the bare tool name).
+ * The concise argument fragment a title shows after the tool name: the
+ * model-facing path for every path-shaped tool (str_replace_editor also
+ * carries a `command` field, so path wins there), the model-written
+ * description for command-only tools (bash/pwsh — a human summary reads
+ * better than a raw command line; the full command stays in rawInput),
+ * falling back to the command line itself, the pattern (plus optional scope)
+ * for search tools, or undefined when the arguments name neither (the title
+ * then falls back to the bare tool name).
  */
 function titleArgumentOf(kind: ToolKindName, rawInput: Record<string, unknown>, cwd: string | undefined): string | undefined {
   if (kind === 'search') {
@@ -271,20 +329,16 @@ function titleArgumentOf(kind: ToolKindName, rawInput: Record<string, unknown>, 
     }
   }
   const path = toolPathOf(rawInput)
-  return path !== undefined ? displayPathOf(path, cwd) : undefined
+  if (path !== undefined) return displayPathOf(path, cwd)
+  const description = firstStringArg(rawInput, ['description'])
+  if (description !== undefined) return description
+  const command = commandOf(rawInput)?.trim()
+  if (command !== undefined && command.length > 0) return command
+  return undefined
 }
 
 /** Human card title for one tool call (see module header for the rationale). */
 export function toolCallTitle(kind: ToolKindName, name: string, rawInput: unknown, cwd?: string): string {
-  if (kind === 'execute') {
-    const command = commandOf(rawInput)?.trim()
-    if (command !== undefined && command.length > 0) {
-      return command.length <= TOOL_CARD_TITLE_MAX
-        ? command
-        : `${command.slice(0, TOOL_CARD_TITLE_MAX)}…`
-    }
-    return name
-  }
   const argument = typeof rawInput === 'object' && rawInput !== null
     ? titleArgumentOf(kind, rawInput as Record<string, unknown>, cwd)
     : undefined
