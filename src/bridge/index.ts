@@ -629,19 +629,26 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   })
 
   // One-shot permission answerer: bridge-owned approval requests become ACP
-  // session/request_permission with allow-once / reject-once choices; foreign
-  // or call-less requests delegate (design §6.1).
+  // session/request_permission with allow-once / allow-always / reject-once
+  // choices; foreign or call-less requests delegate (design §6.1). An
+  // allow-always pick is honored bridge-side for the rest of the session —
+  // dsh's approval vocabulary is one-shot, so the persistent grant lives on
+  // the record and auto-answers later asks for the same tool.
   ctx.on('approval/request', (request, next) => {
     if (conn === undefined) return next()
     const record = store.get(request.agent.session.id)
-    if (record === undefined || record.agent !== request.agent || request.callId === undefined) {
-      return next()
-    }
+    if (record === undefined || record.agent !== request.agent) return next()
+    if (record.allowedTools.has(request.toolName)) return Promise.resolve('allowed-once')
+    if (request.callId === undefined) return next()
     const callId = request.callId
     return drainRecord(record).then(() =>
       conn!.requestPermission(requestPermissionRequest(record.id, callId)),
     ).then(({ outcome }) => {
       if (outcome.outcome === 'cancelled') return 'cancelled'
+      if (outcome.optionId === 'allow-always') {
+        record.allowedTools.add(request.toolName)
+        return 'allowed-once'
+      }
       return outcome.optionId === 'allow-once' ? 'allowed-once' : 'rejected'
     })
   })

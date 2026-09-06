@@ -17,9 +17,10 @@ describe('requestPermissionRequest', () => {
     expect(parsed.success).toBe(true)
   })
 
-  it('offers allow-once and reject-once with v1 permission kinds', () => {
+  it('offers allow-once / allow-always / reject-once with v1 permission kinds', () => {
     const request = requestPermissionRequest('sess-1', 'call-9')
-    expect(request.options.map((option) => option.kind)).toEqual(['allow_once', 'reject_once'])
+    expect(request.options.map((option) => option.kind)).toEqual(['allow_once', 'allow_always', 'reject_once'])
+    expect(request.options.map((option) => option.optionId)).toEqual(['allow-once', 'allow-always', 'reject-once'])
   })
 })
 

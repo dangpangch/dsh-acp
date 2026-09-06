@@ -174,18 +174,22 @@ export function foldTodoPlan(events: readonly SessionEvent[]): readonly { conten
 
 /**
  * The `session/request_permission` request for one bridge-owned tool call:
- * allow-once / reject-once, per the design's one-shot permission answerer.
+ * allow-once / allow-always / reject, per the design's one-shot permission
+ * answerer. An allow-always pick is honored bridge-side for the rest of the
+ * session (dsh's approval vocabulary is one-shot; see the approval/request
+ * answerer in the bridge module).
  */
 export function requestPermissionRequest(sessionId: string, toolCallId: string): {
   sessionId: string
   toolCall: { toolCallId: string }
-  options: { optionId: string; name: string; kind: 'allow_once' | 'reject_once' }[]
+  options: { optionId: string; name: string; kind: 'allow_once' | 'allow_always' | 'reject_once' }[]
 } {
   return {
     sessionId,
     toolCall: { toolCallId },
     options: [
       { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
+      { optionId: 'allow-always', name: 'Always allow', kind: 'allow_always' },
       { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' },
     ],
   }

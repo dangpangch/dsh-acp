@@ -76,6 +76,13 @@ export interface SessionRecord {
   replaying: boolean
   /** Session title most recently pushed on the wire (session_info_update dedupe). */
   lastPushedTitle: string | undefined
+  /**
+   * Tools the user granted "always allow" this session (bridge-owned: dsh's
+   * approval vocabulary is one-shot, so the persistent grant lives here and
+   * auto-answers later asks for the same tool). In-memory only — a reloaded
+   * session asks again.
+   */
+  allowedTools: Set<string>
 }
 
 /**
@@ -137,6 +144,7 @@ export function makeRecord(
     everSentPlan: false,
     replaying: false,
     lastPushedTitle: undefined,
+    allowedTools: new Set(),
     streamedText: new Map(),
     streamedReasoning: new Map(),
   }
