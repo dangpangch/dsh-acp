@@ -78,6 +78,7 @@ import {
   assistantThoughtChunk,
   commandsUpdate,
   committedBlockRemainder,
+  configOptionsUpdate,
   elicitationRequestFor,
   foldTodoPlan,
   planUpdate,
@@ -624,6 +625,25 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       if (outcome.outcome === 'cancelled') return 'cancelled'
       return outcome.optionId === 'allow-once' ? 'allowed-once' : 'rejected'
     })
+  })
+
+  // Catalog hot updates: the model/thought/permission selects advertise a
+  // snapshot of the dsh-llm topology, so when adapters register/replace under
+  // live sessions every online record gets a fresh full-replacement
+  // config_option_update (docs/model-config.zh.md §4). A failed rebuild keeps
+  // the client's current dropdowns (warn, never break the session); replaying
+  // or closing records are skipped.
+  ctx.on('llm/adapters-updated', () => {
+    for (const record of store.values()) {
+      if (record.closed || record.replaying) continue
+      serialize(record, async () => {
+        try {
+          await notify({ sessionId: record.id, update: configOptionsUpdate(await refreshConfigOptions(record)) })
+        } catch (error: unknown) {
+          logger.warn(`dsh-acp-interactive: config options hot refresh failed: ${errorChain(error)}`)
+        }
+      })
+    }
   })
 
   ctx.on('agent/inbox/claimed', ({ agent, message, turn }) => {

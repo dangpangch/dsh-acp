@@ -4,7 +4,7 @@
 // union exactly (sdk 1.4.0 schema/types.gen.d.ts); delivery ordering
 // (per-session serial chain) is the bridge's concern, these are pure builders
 // and folds, unit-testable offline.
-import type { SessionNotification } from '@agentclientprotocol/sdk'
+import type { SessionNotification, SessionConfigOption } from '@agentclientprotocol/sdk'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 // TodoItem and the `todo/write` SessionEventMap entry are owned by the todo
 // tool package since dsh 0.1.2 (DSH-0.1.2-A1/R-11); importing the types pulls
@@ -42,6 +42,16 @@ export function planUpdate(entries: readonly { content: string; status: 'pending
 /** Context-window `usage_update` (used/size; unknown sides never emit). */
 export function usageUpdate(used: number, size: number): SessionNotification['update'] {
   return { sessionUpdate: 'usage_update', used, size }
+}
+
+/**
+ * Whole-list `config_option_update` replacement: the full set of config
+ * options and their current values (ACP v1 full-snapshot semantics — clients
+ * replace, never merge). Emitted when the model catalog changes under live
+ * sessions so the client's model/thought/permission selects stay truthful.
+ */
+export function configOptionsUpdate(configOptions: readonly SessionConfigOption[]): SessionNotification['update'] {
+  return { sessionUpdate: 'config_option_update', configOptions: [...configOptions] }
 }
 
 /** Slash/command catalog announcement. */

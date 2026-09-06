@@ -186,7 +186,7 @@ Authenticate 横幅而不是开出空 picker 的会话。
 - **目录热更新**：订阅 `llm/adapters-updated`（dsh-llm 在每次注册/replace 时发布）→
   对每个在线会话重建 configOptions 并以 `session/update` 的 `config_option_update`
   变体推送——**全量替换快照，非增量**（`updates.ts` `configOptionsUpdate`）。
-  重建失败只 warn（保留旧下拉）；确证为空才推空快照。
+  重建失败只 warn（保留旧下拉）；replay 中/已关闭的会话跳过。
 - **image 能力**：`promptCapabilities.image` 是连接级声明，按**默认路由**的
   `inputModalities` 判定（`supportsImages`，`src/bridge/index.ts`）——中途切到支持
   图像的模型不会（也无法，ACP v1 语义）动态打开。已知取舍。

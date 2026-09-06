@@ -4,7 +4,7 @@
 // exact objects the bridge sends; validating them against the SDK's generated
 // zod schemas pins the wire shapes.
 import { describe, expect, it } from 'vitest'
-import { elicitationRequestFor, requestPermissionRequest } from '../src/bridge/updates.js'
+import { configOptionsUpdate, elicitationRequestFor, requestPermissionRequest } from '../src/bridge/updates.js'
 
 // The SDK does not re-export zod.gen from its entry point; import the module
 // by path (same package instance the bridge ships with).
@@ -20,6 +20,25 @@ describe('requestPermissionRequest', () => {
   it('offers allow-once and reject-once with v1 permission kinds', () => {
     const request = requestPermissionRequest('sess-1', 'call-9')
     expect(request.options.map((option) => option.kind)).toEqual(['allow_once', 'reject_once'])
+  })
+})
+
+describe('configOptionsUpdate', () => {
+  it('validates the whole-snapshot notification against the v1 schema', () => {
+    const notification = {
+      sessionId: 'sess-1',
+      update: configOptionsUpdate([{
+        type: 'select',
+        id: 'model',
+        name: 'Model',
+        description: 'Model used for new requests in this session.',
+        category: 'model',
+        currentValue: 'deepseek-official/deepseek-v4-flash',
+        options: [{ value: 'deepseek-official/deepseek-v4-flash', name: 'DeepSeek / Flash', description: null }],
+      }]),
+    }
+    const parsed = zod.zSessionNotification.safeParse(notification)
+    expect(parsed.success).toBe(true)
   })
 })
 

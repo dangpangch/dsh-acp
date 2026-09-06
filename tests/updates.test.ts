@@ -1,6 +1,7 @@
 // updates: semantic update wire shapes + replay folds (design.zh.md §3.3/§3.4
 // stream/plan/usage rules; §6.2 offline tests).
 import { describe, expect, it } from 'vitest'
+import type { SessionConfigOption } from '@agentclientprotocol/sdk'
 import type { SessionEvent, SessionEventMap } from '@deepseek-ai/dsh-session'
 import type { TodoItem } from '@deepseek-ai/dsh-tool-todo'
 import {
@@ -8,6 +9,7 @@ import {
   assistantThoughtChunk,
   commandsUpdate,
   committedBlockRemainder,
+  configOptionsUpdate,
   foldTodoPlan,
   planUpdate,
   streamTextDelta,
@@ -42,6 +44,23 @@ describe('wire builders', () => {
 
   it('usage updates carry used/size', () => {
     expect(usageUpdate(1200, 65536)).toEqual({ sessionUpdate: 'usage_update', used: 1200, size: 65536 })
+  })
+
+  it('config option updates carry the whole replacement snapshot', () => {
+    const option = {
+      type: 'select',
+      id: 'model',
+      name: 'Model',
+      description: 'Model used for new requests in this session.',
+      category: 'model',
+      currentValue: 'deepseek-official/deepseek-v4-flash',
+      options: [{ value: 'deepseek-official/deepseek-v4-flash', name: 'DeepSeek / Flash', description: null }],
+    } satisfies SessionConfigOption
+    expect(configOptionsUpdate([option])).toEqual({
+      sessionUpdate: 'config_option_update',
+      configOptions: [option],
+    })
+    expect(configOptionsUpdate([])).toEqual({ sessionUpdate: 'config_option_update', configOptions: [] })
   })
 
   it('command announcements use availableCommands with required descriptions', () => {
