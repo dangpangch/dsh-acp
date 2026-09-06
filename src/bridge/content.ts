@@ -18,7 +18,7 @@ export type AttachmentStoreSeam = Pick<AttachmentStore, 'saveImages'> & {
 }
 
 /** Raster formats shared by ACP image blocks and dsh's attachment store. */
-export const IMAGE_MEDIA_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
+const IMAGE_MEDIA_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
 
 export type MediaType = (typeof IMAGE_MEDIA_TYPES)[number]
 
@@ -45,7 +45,7 @@ export class AcpContentError extends Error {
 }
 
 /** One admitted raster image, decoded and canonicalized for the store. */
-export interface AdmittedImage {
+interface AdmittedImage {
   mediaType: MediaType
   data: Uint8Array
 }
@@ -141,7 +141,7 @@ export async function persistImages(
 }
 
 /** Projected dsh user-content block (text segments + durable image refs). */
-export type PromptContent = { type: 'text'; text: string } | { type: 'image'; attachment: ImageAttachmentRef }
+type PromptContent = { type: 'text'; text: string } | { type: 'image'; attachment: ImageAttachmentRef }
 
 /**
  * Rebuild the ordered content for one user message: text and resource links

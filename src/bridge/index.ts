@@ -288,6 +288,17 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     if (closed) throw internalError('the ACP bridge has been disposed')
   }
 
+  /** Best-effort default-preset id from the roster (undefined when absent or broken). */
+  const defaultPresetId = async (): Promise<string | undefined> => {
+    if (presets === undefined) return undefined
+    try {
+      return (await presets.resolve())?.id
+    } catch (error: unknown) {
+      logger.warn(`dsh-acp-interactive: default agent preset unavailable: ${errorChain(error)}`)
+      return undefined
+    }
+  }
+
   const requireSession = (sessionId: SessionId): SessionRecord => {
     const record = store.get(sessionId)
     if (record === undefined) throw invalidParams(`unknown session: ${sessionId}`)
@@ -1043,14 +1054,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     agentPreset: string | undefined,
   ): Promise<{ handle: Awaited<ReturnType<typeof agents.create>>; selection: ModelSelectionRef }> => {
     const { selection, agentOptions } = routeDefaults()
-    let presetId = agentPreset
-    if (presetId === undefined && presets !== undefined) {
-      try {
-        presetId = (await presets.resolve())?.id
-      } catch (error: unknown) {
-        logger.warn(`dsh-acp-interactive: default agent preset unavailable: ${errorChain(error)}`)
-      }
-    }
+    const presetId = agentPreset ?? await defaultPresetId()
     const handle = await agents.resume({
       resumeSessionId: sessionId,
       agentOptions,
@@ -1154,14 +1158,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       // The roster (shipped + user roots) is our own bundle's agent-presets
       // row; an absent roster or a default that no root supplies must not
       // take the session down — the agent still runs on the global layer.
-      let presetId: string | undefined
-      if (presets !== undefined) {
-        try {
-          presetId = (await presets.resolve())?.id
-        } catch (error: unknown) {
-          logger.warn(`dsh-acp-interactive: default agent preset unavailable: ${errorChain(error)}`)
-        }
-      }
+      const presetId = await defaultPresetId()
       let handle
       try {
         handle = await agents.create({

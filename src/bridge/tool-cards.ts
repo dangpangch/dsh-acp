@@ -40,7 +40,7 @@ export function toolResultCall(message: {
 }
 
 /** ACP tool-kind vocabulary used by the wire cards (schema `ToolKind`). */
-export type ToolKindName = 'execute' | 'edit' | 'search' | 'read' | 'delete' | 'other'
+type ToolKindName = 'execute' | 'edit' | 'search' | 'read' | 'delete' | 'other'
 
 /** Coarse ACP tool-kind classification for the generic card icon. */
 export function toolKindFor(name: string): ToolKindName {
@@ -55,7 +55,7 @@ export function toolKindFor(name: string): ToolKindName {
  * Command-runner tools: their result text is captured process output (not a
  * tool-authored confirmation), so the expanded card fences it as a code block.
  */
-export function isCommandTool(name: string): boolean {
+function isCommandTool(name: string): boolean {
   return name === 'bash' || name === 'pwsh'
 }
 
@@ -126,7 +126,7 @@ export function rawInputOf(argumentsJson: string): unknown {
 // when the caller supplies the file's current text.
 
 /** The model-facing path argument shared by every harness filesystem tool. */
-export function toolPathOf(rawInput: unknown): string | undefined {
+function toolPathOf(rawInput: unknown): string | undefined {
   if (typeof rawInput !== 'object' || rawInput === null) return undefined
   const record = rawInput as Record<string, unknown>
   for (const key of ['file_path', 'path']) {
@@ -214,7 +214,7 @@ export function toolCallLocation(
 // produce byte-identical cards.
 
 /** One validated `FileDiff` as the tools' presentation vocabulary defines it. */
-export interface FileDiffLike {
+interface FileDiffLike {
   path: string
   oldText: string | null
   newText: string

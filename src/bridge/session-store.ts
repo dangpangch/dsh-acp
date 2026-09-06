@@ -169,12 +169,6 @@ export function requestStop(record: SessionRecord, cause: AgentCancelCause): voi
 
 /**
  * The model selection to restore for a reloaded session: the LAST
- * `acp/model-selection` snapshot in the durable log (later writes win).
- * Sessions predating the snapshot never carry one — callers then keep their
- * configured defaults.
- */
-/**
- * The model selection to restore for a reloaded session: the LAST
  * `model/selection` snapshot in the durable log (later writes win). Sessions
  * predating the snapshot never carry one — callers then keep their configured
  * defaults.

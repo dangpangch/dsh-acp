@@ -1,6 +1,6 @@
 // dsh-acp-interactive build — output layout matches the bundle contract:
-//   src/plugin.ts    -> lib/plugin.js    (package main; cordis plugin export)
-//   src/dev-bin.ts   -> lib/dev-bin.js   (standalone dev/test boot)
+//   src/bridge/index.ts -> lib/src/bridge/index.js (package main; cordis plugin export)
+//   src/dev-bin.ts      -> lib/dev-bin.js          (standalone dev/test boot)
 // fixedExtension: false + package "type": "module" -> plain .js ESM outputs.
 import { defineConfig } from 'tsdown'
 

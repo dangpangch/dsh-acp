@@ -24,7 +24,7 @@ export interface EffortLevel {
  * vocabulary). A model that resolved but declares no efforts offers nothing:
  * listing levels the request guard would strip is advertising, not support.
  */
-export const CANONICAL_REASONING_LEVELS: readonly EffortLevel[] = [
+const CANONICAL_REASONING_LEVELS: readonly EffortLevel[] = [
   { id: 'off', name: 'Off', description: null },
   { id: 'minimal', name: 'Minimal', description: null },
   { id: 'low', name: 'Low', description: null },
