@@ -122,7 +122,7 @@ export const Config: Schema<BridgeConfig> = Schema.object({
 })
 
 const AGENT_NAME = 'dsh-acp-interactive'
-const AGENT_VERSION = '0.1.0'
+const AGENT_VERSION = '0.2.0'
 const CONFIG_ID_MODEL = 'model'
 const CONFIG_ID_THOUGHT_LEVEL = 'thought_level'
 const CONFIG_ID_PERMISSION = 'permission'
