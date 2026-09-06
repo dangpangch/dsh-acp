@@ -123,18 +123,29 @@ const client = connect(join(here, 'wire-probe.mjs'), { DSH_HOME: home, WIRE_WS: 
   check(validate(z.zNewSessionResponse, 'session/new', created), 'session/new schema')
   const sessionId = created.sessionId
   check(typeof sessionId === 'string' && sessionId.length > 0, 'session/new', 'no sessionId')
-  const thought = created.configOptions?.find((option) => option.id === 'thought_level')
-  check(thought !== undefined, 'session/new', 'thought_level config option missing')
   for (const option of created.configOptions ?? []) {
     validate(z.zSessionConfigOption, `session/new config option ${option.id}`, option)
   }
 
-  // ── set_config_option: thought_level / model / permission ─────────────────
+  // ── set_config_option: thought_level / permission ─────────────────────────
+  // The bridge advertises thought_level only when the model declares reasoning
+  // efforts (a resolved model with none hides the picker — offering levels the
+  // request guard would strip is advertising, not support). The stub model
+  // declares none, so the expected shape here is absence + a rejected pick; a
+  // model that declares efforts exercises the pick round-trip instead.
   step('set_config_option thought_level')
-  const picked = await call('session/set_config_option', { sessionId, configId: 'thought_level', value: thought.options.at(-1).value })
-  check(validate(z.zSetSessionConfigOptionResponse, 'set_config_option thought_level', picked), 'set_config_option schema')
-  check(picked.configOptions?.find((option) => option.id === 'thought_level')?.currentValue === thought.options.at(-1).value,
-    'set_config_option', 'thought_level currentValue did not follow the pick')
+  const thought = created.configOptions?.find((option) => option.id === 'thought_level')
+  if (thought !== undefined) {
+    const picked = await call('session/set_config_option', { sessionId, configId: 'thought_level', value: thought.options.at(-1).value })
+    check(validate(z.zSetSessionConfigOptionResponse, 'set_config_option thought_level', picked), 'set_config_option schema')
+    check(picked.configOptions?.find((option) => option.id === 'thought_level')?.currentValue === thought.options.at(-1).value,
+      'set_config_option', 'thought_level currentValue did not follow the pick')
+  } else {
+    const hidden = await client.req('session/set_config_option', { sessionId, configId: 'thought_level', value: 'high' })
+    seenMethods.set('session/set_config_option', (seenMethods.get('session/set_config_option') ?? 0) + 1)
+    check(hidden.error !== undefined, 'set_config_option thought_level',
+      `hidden picker accepted a pick: ${JSON.stringify(hidden.result ?? null)}`)
+  }
   // The model round-trip is intentionally skipped: the probe catalog also
   // lists the real deepseek provider (no API key here), and picking any model
   // option would route the turn away from the stub adapter. The model switch
