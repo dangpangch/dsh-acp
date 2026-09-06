@@ -9,6 +9,7 @@ import {
   permissionLabel,
   permissionSelectOptions,
   PROVIDER_DEFAULT_REASONING_EFFORT,
+  thoughtLevelCurrentFor,
   thoughtLevelOptionOptions,
   type CatalogProvider,
 } from '../src/bridge/config-options.js'
@@ -51,10 +52,18 @@ describe('effort pickers (thinking-modes semantics)', () => {
     expect(effortOptionsFor(REASONING).map((e) => e.id)).toEqual(['off', 'medium'])
   })
 
-  it('falls back to the canonical level table when the model exposes no reasoning metadata', () => {
+  it('offers nothing for a resolved model that declares no efforts (picker hides)', () => {
+    expect(effortOptionsFor({ efforts: [] })).toEqual([])
+    expect(thoughtLevelOptionOptions({ efforts: [] })).toEqual([])
+  })
+
+  it('falls back to the canonical level table only when support is unknown (lookup failed)', () => {
     const fallback = effortOptionsFor(undefined)
     expect(fallback.map((e) => e.id)).toContain('off')
     expect(fallback.map((e) => e.id)).toContain('max')
+    const offered = thoughtLevelOptionOptions(undefined)
+    expect(offered[0]!.id).toBe(PROVIDER_DEFAULT_REASONING_EFFORT)
+    expect(offered.map((e) => e.id)).toContain('max')
   })
 
   it('prepends the display-only provider-default entry only when no default effort is declared', () => {
@@ -69,6 +78,26 @@ describe('effort pickers (thinking-modes semantics)', () => {
     expect(currentEffortFor(undefined, undefined)).toBe(PROVIDER_DEFAULT_REASONING_EFFORT)
     expect(currentEffortFor(undefined, 'medium')).toBe('medium')
     expect(currentEffortFor('off', undefined)).toBe('off') // an explicit user pick is honored
+  })
+})
+
+describe('thoughtLevelCurrentFor (picker current value, stale-route rule)', () => {
+  it('keeps a pick the offered options contain', () => {
+    expect(thoughtLevelCurrentFor('medium', REASONING)).toBe('medium')
+    expect(thoughtLevelCurrentFor(undefined, { ...REASONING, defaultEffort: 'medium' })).toBe('medium')
+  })
+
+  it('falls back to the declared default when the pick is no longer supported', () => {
+    expect(thoughtLevelCurrentFor('high', { ...REASONING, defaultEffort: 'off' })).toBe('off')
+  })
+
+  it('falls back to provider-default when the pick is unsupported and no default is declared', () => {
+    expect(thoughtLevelCurrentFor('high', REASONING)).toBe(PROVIDER_DEFAULT_REASONING_EFFORT)
+  })
+
+  it('keeps a canonical pick under a failed lookup (unknown, not unsupported)', () => {
+    expect(thoughtLevelCurrentFor('medium', undefined)).toBe('medium')
+    expect(thoughtLevelCurrentFor(undefined, undefined)).toBe(PROVIDER_DEFAULT_REASONING_EFFORT)
   })
 })
 

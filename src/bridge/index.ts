@@ -91,11 +91,11 @@ import { replayUpdatesForEvent } from './replay.js'
 import { mergeSlashCatalog, normalizeSkillSlashText, type SlashCatalogEntry, type SlashCommandEntry, type SlashSkillEntry } from './catalog.js'
 import { diffForToolCall, displayRawInput, rawInputOf, resultBody, toolCallLocation, toolCallTitle, toolKindFor, toolResultCall } from './tool-cards.js'
 import {
-  currentEffortFor,
   guardReasoningEffort,
   modelSelectOptionList,
   permissionSelectOptions,
   PROVIDER_DEFAULT_REASONING_EFFORT,
+  thoughtLevelCurrentFor,
   thoughtLevelOptionOptions,
   type CatalogProvider,
   type ModelReasoning,
@@ -682,10 +682,12 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     try {
       const resolved = await llm.resolveModelInfo(provider, model)
       // A RESOLVED model always yields a ModelReasoning — with an empty
-      // efforts list when it declares none — so the request guard can strip
-      // canonical-fallback picks instead of letting the harness reject the
+      // efforts list when it declares none — which both hides the thinking
+      // selector (the model honors no explicit effort) and lets the request
+      // guard strip stale picks instead of letting the harness reject the
       // turn (UNSUPPORTED_REASONING_EFFORT). undefined is reserved for a
-      // failed lookup, where support is genuinely unknown.
+      // failed lookup, where support is genuinely unknown and the canonical
+      // fallback table stays selectable.
       const reasoning = resolved.reasoning
       return {
         efforts: (reasoning?.efforts ?? []).map((effort) => ({
@@ -735,22 +737,26 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       logger.warn(`dsh-acp-interactive: provider catalog failed: ${String(error)}`)
     }
     const reasoning = await reasoningFor(current.provider, current.model)
+    // Remember exactly which efforts the current model honors so a stale
+    // pick never reaches request assembly (design §6.3 request guard). A
+    // model that resolved but declares no efforts supports NONE of them —
+    // an empty set strips any explicit pick back to provider/default
+    // behavior at prompt time, and the selector below hides (offering
+    // levels the model would refuse is advertising, not support). Only a
+    // failed catalog lookup (reasoning undefined) keeps the pick: unknown,
+    // not unsupported. Refreshed even when the selector hides so a model
+    // switch can never leave a stale supported set behind.
+    record.supportedEfforts = reasoning !== undefined
+      ? new Set((reasoning.efforts ?? []).map((effort) => effort.id))
+      : undefined
+    // A reloaded session can carry a pick the current model no longer offers
+    // (a snapshot from an older build, a catalog change). Heal it durably
+    // BEFORE the select is built, so a reload never resurrects the stale pick
+    // and the currentValue below can only name an offered id.
+    guardCurrentEffort(record)
     const offered = thoughtLevelOptionOptions(reasoning)
     if (offered.length > 0) {
-      // Remember exactly which efforts the current model honors so a stale
-      // pick never reaches request assembly (design §6.3 request guard). A
-      // model that resolved but declares no efforts supports NONE of the
-      // canonical fallback entries — an empty set strips any explicit pick
-      // back to provider/default behavior at prompt time. Only a failed
-      // catalog lookup (reasoning undefined) keeps the pick: unknown, not
-      // unsupported.
-      record.supportedEfforts = reasoning !== undefined
-        ? new Set((reasoning.efforts ?? []).map((effort) => effort.id))
-        : undefined
-      const currentEffort = currentEffortFor(
-        current.reasoningEffort !== undefined ? current.reasoningEffort : undefined,
-        reasoning?.defaultEffort,
-      )
+      const currentEffort = thoughtLevelCurrentFor(record.selection.current?.reasoningEffort, reasoning)
       out.push({
         type: 'select',
         id: CONFIG_ID_THOUGHT_LEVEL,
@@ -826,7 +832,13 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     throw invalidParams(`unknown config option: ${configId}`)
   }
 
-  /** Strip a reasoning effort the current model cannot honor before queueing. */
+  /**
+   * Strip a reasoning effort the current model cannot honor — durably, by
+   * committing the corrected selection (a reload must not resurrect the stale
+   * pick). Runs before the thought_level select is built and again before a
+   * prompt is queued; an unknown supported set (no model metadata yet) keeps
+   * the pick: unknown, not unsupported.
+   */
   const guardCurrentEffort = (record: SessionRecord): void => {
     const current = record.selection.current
     if (current?.reasoningEffort === undefined) return
@@ -835,7 +847,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     const guarded = guardReasoningEffort({ reasoningEffort: current.reasoningEffort }, supported)
     if (guarded.reasoningEffort === undefined) {
       const { reasoningEffort: _stripped, ...rest } = current
-      record.selection.current = rest
+      setSelection(record, rest)
     }
   }
 
