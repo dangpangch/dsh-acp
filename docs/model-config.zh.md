@@ -187,6 +187,14 @@ Authenticate 横幅而不是开出空 picker 的会话。
   对每个在线会话重建 configOptions 并以 `session/update` 的 `config_option_update`
   变体推送——**全量替换快照，非增量**（`updates.ts` `configOptionsUpdate`）。
   重建失败只 warn（保留旧下拉）；replay 中/已关闭的会话跳过。
+- **标题实时推送**：`session/title` 日志事件（dsh-session-title 服务在用户重命名/
+  provider 生成时写入）→ `session_info_update` 推送（`updates.ts` `sessionInfoUpdate`），
+  客户端会话列表实时显示标题；load/resume 后用 `lastSessionTitle` 补推一次持久化
+  标题（firehose 不回放历史事件），按 record 去重。
+- **权限 allow-always**：`session/request_permission` 提供三选项
+  （allow-once / allow-always / reject-once）。dsh 审批词表是一次性的，allow-always
+  由桥记录在会话级 tool allowlist，后续同工具请求自动应答 `allowed-once`（内存态，
+  重载后重问）。
 - **image 能力**：`promptCapabilities.image` 是连接级声明，按**默认路由**的
   `inputModalities` 判定（`supportsImages`，`src/bridge/index.ts`）——中途切到支持
   图像的模型不会（也无法，ACP v1 语义）动态打开。已知取舍。
@@ -278,5 +286,17 @@ llm-pi-ai:
 3. **image 能力按默认路由**（连接级，§4）。
 4. **Zed 预置不回传**：`default_config_options` 是客户端状态（§5.2），桥无法感知
    Zed 显示的"已选模型"与实际路由的偏差。
+5. **终端/文件系统委派未接**（`terminal/*`、`fs/readTextFile`/`fs/writeTextFile`）：
+   Zed 客户端支持（PTY 终端、project buffers），但 dsh 的工具在 agent 运行时内
+   自行执行，桥只观察 session 事件（tool/call → tool/result），无工具执行缝——
+   接入需要上游 harness 提供 bash 可插拔 executor / 预工具 hook。bash 里改的文件
+   因此不会出现在 Zed 的改动文件审查里（fs 工具带结构化 diff，会）。
+6. **未实现的其余客户端面**：`logout`（env-key 认证无可登出物，未广告）、URL
+   elicitation（无生产者）、`compaction_*`（UNSTABLE 且需客户端广告能力）、
+   `setSessionMode`/`current_mode_update`（v1 以 configOptions 取代 modes）、
+   `extMethod`/`extNotification`（Zed 亦未实现）。
+7. **additionalDirectories 硬拒实际不可达**：Zed 仅在代理广告
+   `session_capabilities.additional_directories` 时才发非空值，桥未广告（§2.1）。
+   保留诚实报错作为防御。
 5. **pi-acp 对比中明确不采纳**：`models` 字段双广告（v1 无此字段）、terminal auth、
    会话内切换写全局默认（dsh-acp 严格 per-session）。

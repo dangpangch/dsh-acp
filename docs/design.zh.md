@@ -161,9 +161,10 @@ dsh-acp-interactive **本质上是一个 dsh plugin**（dsh bundle 包，声明
   `ctx.permissionPresets.resolve/optionOf/set`；`permission` 写会话授权档
   （read-only / workspace-write / danger-full-access）。
 - **权限**：`approval/request`（带 callId 的桥内请求）→ ACP
-  `session/request_permission`（allow-once / reject-once 两个选项），结果映射
-  `allowed-once` / `rejected` / `cancelled`；外来或无 callId 的请求 next()
-  放行给宿主。
+  `session/request_permission`（allow-once / allow-always / reject-once 三个选项），
+  结果映射 `allowed-once` / `rejected` / `cancelled`；allow-always 由桥记录在
+  会话级 tool allowlist（dsh 审批词表是一次性的，持久授予存桥侧，内存态），后续
+  同工具请求直接自动应答；外来或无 callId 的请求 next() 放行给宿主。
 - **elicitation**：`ctx.userQuestions.registerProvider` + 表单
   `createElicitation`（绑定 session/tool_call_id），客户端声明
   `elicitation.form` 才启用。

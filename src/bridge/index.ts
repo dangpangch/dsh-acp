@@ -915,6 +915,11 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     mcpServers?: readonly unknown[] | null
   }): void => {
     if (!isAbsolute(params.cwd)) throw invalidParams(`cwd must be an absolute path: ${params.cwd}`)
+    // Unreachable defensive rejection in practice: Zed only fills
+    // additional_directories when the agent advertises the
+    // `session_capabilities.additional_directories` capability, which the
+    // bridge deliberately does not (dsh scopes its file tools to the session
+    // cwd). Keep the honest error should that ever change.
     if (params.additionalDirectories !== undefined && params.additionalDirectories !== null && params.additionalDirectories.length > 0) {
       throw invalidParams('additionalDirectories is not supported')
     }
