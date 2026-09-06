@@ -90,9 +90,21 @@ async function disposeOnce() {
 // emits `end` before the post-boot listener below is attached — and an
 // unlistened `end` is lost forever, leaving the process hanging with no exit
 // path. Watch for it from the start and drain immediately after boot.
+//
+// The bridge holds the wire open for a quiet window after stdin end (its
+// replies must land before the SDK's close aborts the outbound), and this
+// boot has no `appExit` seat for the bridge to request shutdown through —
+// so this fallback exit waits out that window before disposing, never
+// racing an in-flight reply.
 let stdinEnded = false
+const stdinEndExits = () => {
+  setTimeout(() => {
+    void disposeOnce().then(() => process.exit(0))
+  }, 400)
+}
 process.stdin.on('end', () => {
   stdinEnded = true
+  stdinEndExits()
 })
 
 const patches = [...basePatchOps(), ...loadOverlayPatches(NAME, ownPatchPath()), ...presetOverlayOps()]
@@ -100,10 +112,8 @@ const patches = [...basePatchOps(), ...loadOverlayPatches(NAME, ownPatchPath()),
 app = (await boot(NAME, rootEntriesPath(), patches)) as App
 
 if (stdinEnded) {
-  await disposeOnce()
-  process.exit(0)
+  stdinEndExits()
 }
-process.stdin.on('end', () => void disposeOnce().then(() => process.exit(0)))
 process.on('SIGINT', () => void disposeOnce().then(() => process.exit(0)))
 process.on('SIGTERM', () => void disposeOnce().then(() => process.exit(0)))
 process.stdin.resume()

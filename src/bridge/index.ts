@@ -17,7 +17,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { randomUUID } from 'node:crypto'
 import { basename, dirname, isAbsolute, join } from 'node:path'
-import { Readable, Writable } from 'node:stream'
+import { Writable } from 'node:stream'
 import {
   AgentSideConnection,
   PROTOCOL_VERSION,
@@ -1416,6 +1416,42 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     },
   }) as typeof implementation
 
+  // The SDK's close path aborts every outbound mailbox the moment its input
+  // ends, so a reply to a request still in flight when the client closes
+  // stdin would be dropped (reproduced: handler completes, session persists,
+  // wire frame lost). The bridge therefore never forwards stdin end while
+  // work may still be incoming or in flight: chunks flow through a gate, and
+  // the gate's end is withheld until a full quiet window has passed with no
+  // request in flight. Only then can the SDK's close be harmless — every
+  // reply is already on the wire (design.zh.md §6.1 immediate-EOF contract).
+  const STDIN_QUIET_MS = 150
+  const inbound = new TransformStream<Uint8Array, Uint8Array>()
+  const inboundWriter = inbound.writable.getWriter()
+  let stdinEnded = false
+  let quietTimer: ReturnType<typeof setTimeout> | undefined
+  const tryQuietClose = (): void => {
+    if (!stdinEnded || quietTimer !== undefined) return
+    quietTimer = setTimeout(() => {
+      quietTimer = undefined
+      if (!stdinEnded) return
+      if (activeRequests.size > 0) {
+        // Requests dispatched inside the window: hold until they settle, then
+        // re-arm — close only after a fully quiet window.
+        void Promise.allSettled([...activeRequests]).then(tryQuietClose)
+        return
+      }
+      void inboundWriter.close().catch(() => undefined)
+    }, STDIN_QUIET_MS)
+  }
+  void (async () => {
+    for await (const chunk of process.stdin) {
+      await inboundWriter.write(chunk)
+    }
+    stdinEnded = true
+    tryQuietClose()
+  })().catch((error: unknown) => {
+    logger.warn(`dsh-acp-interactive: stdin read failed: ${errorChain(error)}`)
+  })
   conn = new AgentSideConnection(
     (connection) => {
       conn = connection
@@ -1423,7 +1459,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     },
     ndJsonStream(
       Writable.toWeb(process.stdout) as WritableStream<Uint8Array>,
-      Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>,
+      inbound.readable,
     ),
   )
 
@@ -1463,13 +1499,13 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     return quiescing
   }
 
-  // Connection end == serving session over: under the dsh CLI profile boot the
-  // composition owns process lifetime (the launcher wires SIGINT/SIGTERM but
-  // nothing exits when the client closes stdin), so once our quiescent
-  // teardown drained every reply, request a bounded tree shutdown through the
-  // launcher-published `ctx.appExit` (immediate-EOF smoke: exit 0). The same
-  // chain also covers EOF that arrives before this plugin applies — the SDK
-  // closes the connection the moment its input stream ends.
+  // Connection end == serving session over: the gate above forwards stdin end
+  // only after a quiet drain, so by the time the SDK closes, every reply is
+  // already on the wire. Under the dsh CLI profile boot the composition owns
+  // process lifetime (the launcher wires SIGINT/SIGTERM but nothing exits
+  // when the client closes stdin), so once the quiescent teardown has run,
+  // request a bounded tree shutdown through the launcher-published
+  // `ctx.appExit` (immediate-EOF smoke: exit 0).
   const appExit = ctx.get('appExit') as ((code?: number) => void) | undefined
   let exitStarted = false
   void conn.closed.catch((error: unknown) => {
@@ -1481,7 +1517,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       appExit(0)
     }
   }).catch((error: unknown) => {
-    logger.warn(`dsh-acp-interactive: connection-close teardown failed: ${String(error)}`)
+    logger.warn(`dsh-acp-interactive: connection-close teardown failed: ${errorChain(error)}`)
   })
   ctx.effect(() => quiesce, 'dsh-acp-interactive.connection')
 
