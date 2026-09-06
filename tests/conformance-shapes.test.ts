@@ -4,7 +4,7 @@
 // exact objects the bridge sends; validating them against the SDK's generated
 // zod schemas pins the wire shapes.
 import { describe, expect, it } from 'vitest'
-import { configOptionsUpdate, elicitationRequestFor, requestPermissionRequest } from '../src/bridge/updates.js'
+import { configOptionsUpdate, elicitationRequestFor, requestPermissionRequest, sessionInfoUpdate } from '../src/bridge/updates.js'
 
 // The SDK does not re-export zod.gen from its entry point; import the module
 // by path (same package instance the bridge ships with).
@@ -37,6 +37,14 @@ describe('configOptionsUpdate', () => {
         options: [{ value: 'deepseek-official/deepseek-v4-flash', name: 'DeepSeek / Flash', description: null }],
       }]),
     }
+    const parsed = zod.zSessionNotification.safeParse(notification)
+    expect(parsed.success).toBe(true)
+  })
+})
+
+describe('sessionInfoUpdate', () => {
+  it('validates the title notification against the v1 schema', () => {
+    const notification = { sessionId: 'sess-1', update: sessionInfoUpdate('Fix the login flow') }
     const parsed = zod.zSessionNotification.safeParse(notification)
     expect(parsed.success).toBe(true)
   })

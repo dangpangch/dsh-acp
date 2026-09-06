@@ -12,6 +12,7 @@ import {
   configOptionsUpdate,
   foldTodoPlan,
   planUpdate,
+  sessionInfoUpdate,
   streamTextDelta,
   toolCallContent,
   codeFence,
@@ -46,8 +47,7 @@ describe('wire builders', () => {
     expect(usageUpdate(1200, 65536)).toEqual({ sessionUpdate: 'usage_update', used: 1200, size: 65536 })
   })
 
-  it('config option updates carry the whole replacement snapshot', () => {
-    const option = {
+  it('config option updates carry the whole replacement snapshot', () => {    const option = {
       type: 'select',
       id: 'model',
       name: 'Model',
@@ -61,6 +61,13 @@ describe('wire builders', () => {
       configOptions: [option],
     })
     expect(configOptionsUpdate([])).toEqual({ sessionUpdate: 'config_option_update', configOptions: [] })
+  })
+
+  it('session info updates carry the new title (partial metadata update)', () => {
+    expect(sessionInfoUpdate('Refactor the bridge')).toEqual({
+      sessionUpdate: 'session_info_update',
+      title: 'Refactor the bridge',
+    })
   })
 
   it('command announcements use availableCommands with required descriptions', () => {

@@ -54,6 +54,15 @@ export function configOptionsUpdate(configOptions: readonly SessionConfigOption[
   return { sessionUpdate: 'config_option_update', configOptions: [...configOptions] }
 }
 
+/**
+ * Session-metadata `session_info_update` (partial update; the bridge only
+ * streams titles). Lets the client's session list show the session's own
+ * title — generated or renamed — without re-listing sessions.
+ */
+export function sessionInfoUpdate(title: string): SessionNotification['update'] {
+  return { sessionUpdate: 'session_info_update', title }
+}
+
 /** Slash/command catalog announcement. */
 export function commandsUpdate(commands: readonly { name: string; description?: string | null; input?: string | null }[]): SessionNotification['update'] {
   return {

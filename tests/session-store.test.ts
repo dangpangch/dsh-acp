@@ -2,7 +2,7 @@
 // the durable model-selection fold (design.zh.md §6.2/§6.3 primitives).
 import { describe, expect, it } from 'vitest'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import { createInflight, lastModelSelection, makeRecord, removeRecord, type PromptInflight, type SessionRecord } from '../src/bridge/session-store.js'
+import { createInflight, lastModelSelection, lastSessionTitle, makeRecord, removeRecord, type PromptInflight, type SessionRecord } from '../src/bridge/session-store.js'
 
 /** Minimal session event fixture (seq/time are irrelevant to the fold). */
 const event = (type: string, data: unknown): SessionEvent => ({ type, seq: 0, time: 0, data }) as never
@@ -109,5 +109,23 @@ describe('lastModelSelection (durable selection fold)', () => {
     ])
     expect(restored).toEqual({ provider: 'pi-ai', model: 'claude-x' })
     expect('reasoningEffort' in restored!).toBe(false)
+  })
+})
+
+describe('lastSessionTitle (durable title fold)', () => {
+  it('returns undefined for a title-less log', () => {
+    expect(lastSessionTitle([])).toBeUndefined()
+    expect(lastSessionTitle([
+      event('turn/start', { turn: 0 }),
+      event('model/selection', { provider: 'pi-ai', model: 'claude-x' }),
+    ])).toBeUndefined()
+  })
+
+  it('returns the latest title, later writes winning over earlier ones', () => {
+    expect(lastSessionTitle([
+      event('session/title', { title: 'first', messageSeqs: [1, 2], source: { kind: 'provider' } }),
+      event('turn/start', { turn: 0 }),
+      event('session/title', { title: 'renamed', messageSeqs: [], source: { kind: 'user' } }),
+    ])).toBe('renamed')
   })
 })

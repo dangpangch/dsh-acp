@@ -66,6 +66,7 @@ import {
   createInflight,
   drainRecord,
   lastModelSelection,
+  lastSessionTitle,
   makeRecord,
   removeRecord,
   requestStop,
@@ -83,6 +84,7 @@ import {
   foldTodoPlan,
   planUpdate,
   requestPermissionRequest,
+  sessionInfoUpdate,
   streamTextDelta,
   toolCallContent,
   toolCallDiffContent,
@@ -422,9 +424,23 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     deliver(record, planUpdate([]))
   }
 
+  /**
+   * Stream one session-title change to the client as a `session_info_update`
+   * so its session list shows the generated/renamed title live. Deduped per
+   * record (the title service can write consecutive snapshots) and skipped
+   * during replay — the load path pushes the persisted title explicitly.
+   */
+  const deliverSessionTitle = (record: SessionRecord, title: string): void => {
+    if (record.closed || record.replaying || record.lastPushedTitle === title) return
+    record.lastPushedTitle = title
+    serialize(record, async () => {
+      if (record.closed || record.replaying) return
+      await notify({ sessionId: record.id, update: sessionInfoUpdate(title) })
+    })
+  }
+
   /** Deliver a generic tool card on call and its terminal update on result. */
-  const deliverToolCall = (record: SessionRecord, call: { callId: string; name: string; arguments: string }): void => {
-    // The title reads the model's own arguments (description); the wire
+  const deliverToolCall = (record: SessionRecord, call: { callId: string; name: string; arguments: string }): void => {    // The title reads the model's own arguments (description); the wire
     // rawInput is the display form (workdir + command for command runners).
     const parsed = rawInputOf(call.arguments)
     const kind = toolKindFor(call.name)
@@ -588,6 +604,9 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       }
       case 'todo/write':
         deliverPlan(record, event.data.todos)
+        break
+      case 'session/title':
+        deliverSessionTitle(record, event.data.title)
         break
       case 'turn/start':
         deliverPlanClear(record)
@@ -1209,6 +1228,11 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
             await replayHistory(record, snapshot.events)
           }
         : undefined)
+      // Sync the persisted title once after replay: the firehose never
+      // re-delivers historical title events, and without this the client
+      // keeps a provisional title for the reloaded session.
+      const restoredTitle = snapshot !== undefined ? lastSessionTitle(snapshot.events) : undefined
+      if (restoredTitle !== undefined) deliverSessionTitle(record, restoredTitle)
       return { configOptions }
     },
 

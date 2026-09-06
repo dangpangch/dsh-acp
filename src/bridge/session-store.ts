@@ -74,6 +74,8 @@ export interface SessionRecord {
   streamedReasoning: Map<string, string>
   /** True while the record streams historical replay (no live output yet). */
   replaying: boolean
+  /** Session title most recently pushed on the wire (session_info_update dedupe). */
+  lastPushedTitle: string | undefined
 }
 
 /**
@@ -134,6 +136,7 @@ export function makeRecord(
     sentPlanFold: undefined,
     everSentPlan: false,
     replaying: false,
+    lastPushedTitle: undefined,
     streamedText: new Map(),
     streamedReasoning: new Map(),
   }
@@ -173,6 +176,21 @@ export function lastModelSelection(events: readonly SessionEvent[]): ModelSelect
     const event = events[index]!
     if (event.type !== 'model/selection') continue
     return { ...event.data }
+  }
+  return undefined
+}
+
+/**
+ * The LAST `session/title` snapshot in the durable log (later writes win), so
+ * a reloaded session can push its own title to the client — the firehose
+ * never re-delivers historical title events. Title-less sessions return
+ * undefined and the client keeps its provisional title.
+ */
+export function lastSessionTitle(events: readonly SessionEvent[]): string | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]!
+    if (event.type !== 'session/title') continue
+    return event.data.title
   }
   return undefined
 }
