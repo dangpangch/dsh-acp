@@ -24,7 +24,9 @@
 
 - insert:
     # Per-session agent-preset roster. `default` names the preset every ACP
-    # agent is composed from (plain native-tool coding agent). The dsh CLI
+    # agent is composed from (plain native-tool coding agent); a deployment
+    # override is read by the BRIDGE from DSH_ACP_PRESET at session creation
+    # (restart to change, see README "Presets & model route"). The dsh CLI
     # profile boot appends the shipped preset root (and the home user root is
     # derived) onto this row automatically; a standalone dev boot must supply
     # its own roots (see src/dev-bin.ts).
@@ -41,8 +43,9 @@
 
     # The ACP bridge plugin: opens the AgentSideConnection over stdin/stdout
     # once the tree settles and drives ctx.agents sessions. provider/model are
-    # the shipped route defaults; clients may switch per session through
-    # configOptions.
+    # the shipped route defaults, overridable by the bridge from
+    # DSH_ACP_PROVIDER / DSH_ACP_MODEL at boot (restart to change); clients
+    # may still switch per session through configOptions.
     - id: dsh-acp-v1
       name: 'dsh-acp-v1'
       config:

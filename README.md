@@ -134,6 +134,28 @@ command), `additionalDirectories`,
 audio/embeddedContext, MCP mounting (non-empty `mcpServers` is rejected with an
 explanation), fine-grained diff cards, Windows.
 
+## Presets & model route (deployment fields)
+
+The agent preset and the default model route are deployment fields, read from
+the environment **once at boot** (changing them means restarting the agent):
+
+- `DSH_ACP_PRESET` — the preset every ACP session is composed from (default
+  `standard`; shipped roster: `standard`, `minimal`, `ptc`, `cordis`). A value
+  no installed preset supplies fails `session/new` with a readable error
+  listing the available presets. Presets beyond `standard` expect the harness
+  installation's host rows resolvable (`minimal` needs `dsh-terminal`;
+  `ptc`/`cordis` need their host plugins) — a base-only standalone boot may
+  not mount them.
+- `DSH_ACP_PROVIDER` / `DSH_ACP_MODEL` — the shipped default route
+  (`deepseek-official` / `deepseek-v4-flash`); the per-session Model config
+  option still overrides.
+
+Presets are not a session option: a preset decides the tool set, and swapping
+it mid-session would break session semantics. Extra presets live in the
+per-user preset root under `$DSH_HOME`; presets such as `code`/`cordis`
+require their host plugins (`code-runtime`, `cordis-host-runner`) installed
+separately.
+
 ## Develop
 
 ```bash

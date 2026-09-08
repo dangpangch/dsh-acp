@@ -27,8 +27,9 @@ dsh-acp-v1 **本质上是一个 dsh plugin**（dsh bundle 包，声明
     的要求），**替换** dsh-base 默认 persona；
   - `hmr.disabled: true`：ACP stdio 会话不能热重载（会撕断连接）；
   - `agent-presets`（`@deepseek-ai/dsh-agent-presets`，`default: standard`）：
-    每个 ACP agent 由 preset 组合；dsh CLI profile boot 自动补 shipped preset
-    root，独立 dev boot 须自带 roots（fixture overlay）；
+    每个 ACP agent 由 preset 组合；部署覆盖 `DSH_ACP_PRESET` 由桥在会话创建时
+    解析/校验（见 §5，patch 层不写 `!!js`）；dsh CLI profile boot 自动补
+    shipped preset root，独立 dev boot 须自带 roots（fixture overlay）；
   - `dsh-acp-v1`：bridge 行（provider `deepseek-official` / model
     `deepseek-v4-flash`，客户端可经 configOptions 逐会话切换）。
 - dsh-base 提供全部宿主行（llm / agents / sessions / persistence /
@@ -215,6 +216,7 @@ prompt。diff 卡片与 locations 属于 `tool_call`/`tool_call_update` 的可�
 | resource 块 | 不声明 embeddedContext，但优雅降级为纯文本（pi-acp 同款，见 §3.2） |
 | elicitation | userQuestions provider + createElicitation（client capability 门控） |
 | 权限档 | config option `permission`（permissionPresets.set） |
+| 预设/路由 | 部署字段：`DSH_ACP_PRESET`/`DSH_ACP_PROVIDER`/`DSH_ACP_MODEL` 由桥在会话/agent 创建时读取（改 env 需重启）。预设=工具集，**不进会话选择器**（中途换会破坏 session 语义）；newSession 对无 root 供给的取值回 invalidParams 并列出可用预设（P1-4）。patch 行保持字面量默认值——本走廊 loader 对 patch 行 `!!js` 的求值时机不可依赖（cnctem 的 `!!js` 写法属其 rc.2 走廊，未在本走廊复现），故由桥代码统一处理 env |
 | MCP | 本轮不做：非空 mcpServers → invalidParams |
 | 能力纪律 | 先实现、后声明（list/load/delete/resume 随实现同步开启） |
 

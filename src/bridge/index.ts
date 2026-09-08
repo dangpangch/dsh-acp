@@ -129,6 +129,11 @@ const CONFIG_ID_THOUGHT_LEVEL = 'thought_level'
 const CONFIG_ID_PERMISSION = 'permission'
 const AUTH_ENV_KEY = 'DEEPSEEK_API_KEY'
 
+/** Deployment env overrides (P1-4): read at session/agent creation, change = restart. */
+const ENV_PRESET = 'DSH_ACP_PRESET'
+const ENV_PROVIDER = 'DSH_ACP_PROVIDER'
+const ENV_MODEL = 'DSH_ACP_MODEL'
+
 /** Canonical write-permission preset ids (mirrors the dsh-base permission row). */
 const PERMISSION_PRESETS = ['read-only', 'workspace-write', 'danger-full-access'] as const
 
@@ -136,9 +141,14 @@ type WireConfigOptions = NonNullable<NewSessionResponse['configOptions']>
 
 /** Agent-presets roster seam (default-preset join per session, best effort). */
 interface AgentPresetsSeam {
-  resolve(): Promise<{ readonly id: string }> | { readonly id: string }
+  resolve(id?: string): Promise<{ readonly id: string }> | { readonly id: string }
   mount(ctx: unknown, id: string): Promise<unknown>
+  /** Optional roster listing, used only to build readable default errors. */
+  list?(): Promise<Array<{ readonly id: string }>>
 }
+
+/** The deployment default preset could not be resolved (P1-4). */
+class PresetDefaultError extends Error {}
 
 /** Session-history query engine seam (session/list + load replay + titles). */
 interface SessionQuerySeam {
@@ -289,14 +299,48 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     if (closed) throw internalError('the ACP bridge has been disposed')
   }
 
+  /** Deployment-preset id: `DSH_ACP_PRESET` when set, else the roster default. */
+  const presetIdForEnv = (): string | undefined => {
+    const preset = process.env[ENV_PRESET]
+    return preset !== undefined && preset.trim() !== '' ? preset : undefined
+  }
+
   /** Best-effort default-preset id from the roster (undefined when absent or broken). */
   const defaultPresetId = async (): Promise<string | undefined> => {
     if (presets === undefined) return undefined
     try {
-      return (await presets.resolve())?.id
+      return (await presets.resolve(presetIdForEnv()))?.id
     } catch (error: unknown) {
       logger.warn(`dsh-acp-v1: default agent preset unavailable: ${errorChain(error)}`)
       return undefined
+    }
+  }
+
+  /** Preset ids the configured roots supply, for readable error messages. */
+  const availablePresetIds = async (): Promise<string | undefined> => {
+    if (presets === undefined || presets.list === undefined) return undefined
+    try {
+      const rows = await presets.list()
+      return rows.map((row) => row.id).join(', ')
+    } catch (error: unknown) {
+      logger.warn(`dsh-acp-v1: preset list unavailable: ${errorChain(error)}`)
+      return undefined
+    }
+  }
+
+  /** Strict default-preset id for NEW sessions (P1-4): the default is a
+   * deployment field (DSH_ACP_PRESET), so a default no root supplies is a
+   * client-visible config error, never a silent global-layer session. An
+   * absent roster (no preset seats at all) still degrades. */
+  const strictDefaultPresetId = async (): Promise<string | undefined> => {
+    if (presets === undefined) return undefined
+    try {
+      return (await presets.resolve(presetIdForEnv()))?.id
+    } catch (error: unknown) {
+      const label = presetIdForEnv() !== undefined ? 'DSH_ACP_PRESET preset' : 'default agent preset'
+      const message = `${label} unavailable: ${errorChain(error)}`
+      const available = await availablePresetIds()
+      throw new PresetDefaultError(available === undefined ? message : `${message} — available: ${available}`)
     }
   }
 
@@ -720,17 +764,21 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   }
 
   // ── config options (P1): model + thought_level selects ────────────────────
-  /** Shipped route defaults: a model-selection ref plus the factory options bag. */
+  /** Shipped route defaults: a model-selection ref plus the factory options bag.
+   * Deployment env overrides (DSH_ACP_PROVIDER / DSH_ACP_MODEL) win over the
+   * patch row's defaults; per-session config options still override both. */
   const routeDefaults = (): {
     selection: ModelSelectionRef
     agentOptions: { provider?: string; model?: string } | undefined
   } => {
+    const provider = process.env[ENV_PROVIDER] ?? config.provider
+    const model = process.env[ENV_MODEL] ?? config.model
     const selection: ModelSelectionRef = { current: undefined, assembled: undefined }
-    if (config.provider !== undefined && config.model !== undefined) {
-      selection.current = { provider: config.provider, model: config.model }
+    if (provider !== undefined && model !== undefined) {
+      selection.current = { provider, model }
     }
-    const agentOptions = config.provider !== undefined || config.model !== undefined
-      ? { provider: config.provider, model: config.model }
+    const agentOptions = provider !== undefined || model !== undefined
+      ? { provider, model }
       : undefined
     return { selection, agentOptions }
   }
@@ -1155,11 +1203,16 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       validateWorkspaceParams(params)
       const sessionId = brandSessionId(randomUUID())
       const { selection, agentOptions } = routeDefaults()
-      // Best-effort default-preset join (agent plane tools/prompt sections).
-      // The roster (shipped + user roots) is our own bundle's agent-presets
-      // row; an absent roster or a default that no root supplies must not
-      // take the session down — the agent still runs on the global layer.
-      const presetId = await defaultPresetId()
+      // Deployment-preset join: an absent roster keeps the global-layer
+      // session; a preset no root supplies (DSH_ACP_PRESET typo) is a config
+      // error surfaced as invalidParams — never a silent partial session.
+      let presetId: string | undefined
+      try {
+        presetId = await strictDefaultPresetId()
+      } catch (error: unknown) {
+        if (error instanceof PresetDefaultError) throw invalidParams(error.message)
+        throw error
+      }
       let handle
       try {
         handle = await agents.create({

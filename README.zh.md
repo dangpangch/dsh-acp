@@ -119,6 +119,23 @@ sessionId），随后 exit 0。
 `additionalDirectories`、audio/embeddedContext、MCP 挂载（非空
 `mcpServers` 拒绝并说明）、细粒度 diff 卡片、Windows。
 
+## 预设与模型路由（部署字段）
+
+agent 预设与默认模型路由是**部署字段**，启动时从环境变量读取一次（改动 =
+重启 agent 后生效）：
+
+- `DSH_ACP_PRESET` — 每个 ACP 会话由哪个预设组合（缺省 `standard`；随包目录含
+  `standard`、`minimal`、`ptc`、`cordis`）。取值若没有已安装预设提供，
+  `session/new` 会返回带可用预设列表的可读错误。`standard` 之外的预设依赖
+  harness 安装的宿主行可解析（`minimal` 需要 `dsh-terminal`；`ptc`/`cordis`
+  需要各自宿主插件）——纯 base 的独立 boot 未必能挂载它们。
+- `DSH_ACP_PROVIDER` / `DSH_ACP_MODEL` — 随包默认路由
+  （`deepseek-official` / `deepseek-v4-flash`）；会话级 Model 选项仍可覆盖。
+
+预设不是会话选项：预设决定工具集，会话中途换预设会破坏 session 语义。额外预设放
+`$DSH_HOME` 下的用户预设根；`code`/`cordis` 等预设需另行安装宿主插件
+（`code-runtime`、`cordis-host-runner`）。
+
 ## 开发
 
 ```bash
