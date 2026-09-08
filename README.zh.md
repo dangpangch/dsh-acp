@@ -1,6 +1,6 @@
-# dsh-acp-interactive
+# dsh-acp-v1
 
-> **dsh-acp-interactive 本质上是一个 dsh plugin**：补足 dsh 原生 ACP 缺失的
+> **dsh-acp-v1 本质上是一个 dsh plugin**：补足 dsh 原生 ACP 缺失的
 > ACP 能力，把 DeepSeek Harness（dsh）作为**自定义 agent server extension**
 > 提供给 Zed Editor（一个交互式 ACP v1 服务器）。
 

@@ -1,6 +1,6 @@
-# dsh-acp-interactive × DSH 0.1.2-rc.1 兼容性审查报告
+# dsh-acp-v1 × DSH 0.1.2-rc.1 兼容性审查报告
 
-- **审查对象**: `dsh-acp-interactive` 0.1.0（宿主侧 bundle 插件：把 DSH 经 ACP v1 / stdio 暴露给 Zed Agent Panel）
+- **审查对象**: `dsh-acp-v1` 0.1.0（宿主侧 bundle 插件：把 DSH 经 ACP v1 / stdio 暴露给 Zed Agent Panel）
 - **源状态**: git `main` @ `3b8a1a2f`，工作树干净（审查全程零写入）
 - **审查依据**: oh-my-dsh/dsh-plugin-upgrade-skill @ `8f81449`（2026-09-06 同步），Mode C 静态审查流程 + pre-flight 七类触点 + 版本走廊全卡片
 - **版本走廊**: `dsh-v0.1.1-rc.2 → dsh-v0.1.2-rc.1`（alpha.1 → alpha.2 → alpha.3 → alpha.4 → alpha.5 → rc.1 六条边；适配提交 `7716c8bc`，2026-09-05，此后另有 5 个功能提交）
@@ -10,7 +10,7 @@
 
 | 项 | 值 | 验证方式 |
 |---|---|---|
-| 包名 / 版本 | `dsh-acp-interactive` 0.1.0（private，预构建 `lib/` 随仓库分发） | package.json |
+| 包名 / 版本 | `dsh-acp-v1` 0.1.0（private，预构建 `lib/` 随仓库分发） | package.json |
 | 安装轨 | GitHub 仓库 / 本地 link（bundle patch 安装，非 npm 注册表包） | README、cordis.patch.yml |
 | DSH cohort | 全部 `@deepseek-ai/dsh-*` 精确钉 `0.1.2-rc.1`；cordis 4.0.2；schemastery 3.18.1 | package.json + 全量 lockfile 扫描 + node_modules 逐一读取 |
 | lockfile | 无混合 cohort、无旧代残留；schemastery 同时解析 3.18.1/3.18.2（pnpm 隔离布局下的嵌套副本，无害） | grep pnpm-lock.yaml |

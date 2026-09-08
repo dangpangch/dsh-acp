@@ -15,7 +15,7 @@ describe.skipIf(skip)('frame purity (spawned lib/dev-bin.js, isolated DSH_HOME)'
   it(
     'initialize + session/new answer with pure ndjson results and EOF exits 0',
     async () => {
-      const client = connect(BIN, { DSH_HOME: mkdtempSync(join(tmpdir(), 'dsh-acp-interactive-test-')) })
+      const client = connect(BIN, { DSH_HOME: mkdtempSync(join(tmpdir(), 'dsh-acp-v1-test-')) })
       const first = await client.req('initialize', { protocolVersion: 1, clientCapabilities: {} })
       const second = await client.req('session/new', { cwd: '/tmp', mcpServers: [] })
       client.closeStdin()

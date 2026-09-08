@@ -42,7 +42,7 @@ const patches = [
   ...loadOverlayPatches(NAME, join(root, 'cordis.patch.yml')),
   { id: 'agent-presets', config: { default: 'standard', roots: [{ path: join(dirname(require.resolve('@deepseek-ai/dsh-agent-presets/package.json')), 'presets'), trust: 'system' }] } },
   { id: 'agent-default-model', config: { provider: 'stub', model: 'stub-model' } },
-  { id: 'dsh-acp-interactive', config: { provider: 'stub', model: 'stub-model' } },
+  { id: 'dsh-acp-v1', config: { provider: 'stub', model: 'stub-model' } },
   { insert: [{ id: 'wire-stub-llm', name: stubModule }] },
 ]
 

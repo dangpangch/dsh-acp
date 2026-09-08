@@ -1,6 +1,6 @@
-# dsh-acp 模型与模型选项配置报告
+# dsh-acp-v1 模型与模型选项配置报告
 
-调查 dsh-acp-interactive 中与"模型"和"模型选项"（configOptions）有关的全部配置面、
+调查 dsh-acp-v1 中与"模型"和"模型选项"（configOptions）有关的全部配置面、
 数据流与边界状态。所有结论都经过源码核对或无头复现验证（2026-09-06，sdk 1.4.0 /
 dsh 0.1.2-rc.1 基线）。行号以当前工作区为准，后续提交可能漂移。
 
@@ -10,7 +10,7 @@ dsh 0.1.2-rc.1 基线）。行号以当前工作区为准，后续提交可能�
 ## 1. 总览：一条模型从配置到下拉框的路径
 
 ```
-部署侧配置                      运行时目录（dsh-llm）                桥（dsh-acp）                        Zed
+部署侧配置                      运行时目录（dsh-llm）                桥（dsh-acp-v1）                        Zed
 ────────────────────────       ─────────────────────────           ─────────────────────────────        ──────────────
 cordis.patch.yml 桥行    ──┐    llm-deepseek 适配器                ctx.llm.listProviders()        session/new
   provider/model          │      (settings.yaml `llm-deepseek:`)      ctx.llm.listModels(id)    ──▶  configOptions
@@ -94,7 +94,7 @@ llm-pi-ai:
   的能力，借不到 = `reasoning: false`（无思考控制）；`false` → 显式无思考；声明 dict →
   pi 的 7 级词表（`off/minimal/low/medium/high/xhigh/max`，`:291`）全部显式钉死，
   未列级别一律不可用。
-- level 词表是 pi 的 7 级；**dsh-acp 的 canonical 兜底表与其同词表**。
+- level 词表是 pi 的 7 级；**dsh-acp-v1 的 canonical 兜底表与其同词表**。
 
 ### 2.3 `agent-default-model` 行：对 ACP 会话不生效（重要）
 
@@ -233,7 +233,7 @@ session 头、零个 `model/selection` 事件——即桥从未收到任何 `set
 `~/.dsh/profiles/acp/cordis.patch.yml`（用户 patch 层，空数组 → 加条目）：
 
 ```yaml
-- id: dsh-acp-interactive
+- id: dsh-acp-v1
   config:
     provider: tokenrouter          # 必须是已注册的适配器路由（settings 激活的 pi-ai profile id）
     model: z-ai/glm-5.3-free       # 适配器可解析的 model id（可含斜杠）
@@ -299,4 +299,4 @@ llm-pi-ai:
    `session_capabilities.additional_directories` 时才发非空值，桥未广告（§2.1）。
    保留诚实报错作为防御。
 5. **pi-acp 对比中明确不采纳**：`models` 字段双广告（v1 无此字段）、terminal auth、
-   会话内切换写全局默认（dsh-acp 严格 per-session）。
+   会话内切换写全局默认（dsh-acp-v1 严格 per-session）。

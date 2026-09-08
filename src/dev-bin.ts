@@ -1,4 +1,4 @@
-// dsh-acp-interactive: standalone dev/test boot — the same composition the
+// dsh-acp-v1: standalone dev/test boot — the same composition the
 // `dsh --profile acp` CLI path mounts (dsh-base bundle + this package's
 // cordis.patch.yml), driven directly through @deepseek-ai/dsh-app-boot so
 // tests can spawn it without a real $DSH_HOME profile. stdout stays
@@ -9,7 +9,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { boot, installFailLoud, loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 
-const NAME = 'dsh-acp-interactive-dev'
+const NAME = 'dsh-acp-v1-dev'
 
 function packageRoot(): string {
   const here = dirname(fileURLToPath(import.meta.url))

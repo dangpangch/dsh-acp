@@ -1,4 +1,4 @@
-// dsh-acp-interactive: interactive ACP (Agent Client Protocol) v1 plugin for
+// dsh-acp-v1: interactive ACP (Agent Client Protocol) v1 plugin for
 // the DeepSeek Harness (dsh). Runs as a dsh bundle plugin inside a dsh profile
 // (dsh --profile acp), opened by Zed's Agent Panel over stdio. One
 // AgentSideConnection per process; one session record per ACP session;
@@ -105,7 +105,7 @@ import {
 } from './config-options.js'
 
 /** Stable cordis plugin name (design.zh.md §5). */
-export const name = 'dsh-acp-interactive'
+export const name = 'dsh-acp-v1'
 
 /** Agent spine services this bridge programs (validated on the rc.2 baseline). */
 export const inject = ['agents', 'sessions', 'sessionQuery', 'sessionPersistence']
@@ -121,8 +121,8 @@ export const Config: Schema<BridgeConfig> = Schema.object({
   model: Schema.string(),
 })
 
-const AGENT_NAME = 'dsh-acp-interactive'
-const AGENT_VERSION = '0.2.0'
+const AGENT_NAME = 'dsh-acp-v1'
+const AGENT_VERSION = '0.3.0'
 const CONFIG_ID_MODEL = 'model'
 const CONFIG_ID_THOUGHT_LEVEL = 'thought_level'
 const CONFIG_ID_PERMISSION = 'permission'
@@ -294,7 +294,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     try {
       return (await presets.resolve())?.id
     } catch (error: unknown) {
-      logger.warn(`dsh-acp-interactive: default agent preset unavailable: ${errorChain(error)}`)
+      logger.warn(`dsh-acp-v1: default agent preset unavailable: ${errorChain(error)}`)
       return undefined
     }
   }
@@ -312,7 +312,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     try {
       await conn.sessionUpdate(notification)
     } catch (error: unknown) {
-      logger.warn(`dsh-acp-interactive: session/update failed: ${String(error)}`)
+      logger.warn(`dsh-acp-v1: session/update failed: ${String(error)}`)
     }
   }
 
@@ -324,7 +324,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     }).catch((error: unknown) => {
       const inflight = record.inflight
       if (inflight !== undefined) inflight.outputError ??= new Error(String(error))
-      logger.warn(`dsh-acp-interactive: output delivery failed: ${errorChain(error)}`)
+      logger.warn(`dsh-acp-v1: output delivery failed: ${errorChain(error)}`)
     })
   }
 
@@ -373,7 +373,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     record.outputTail = record.outputTail.then(task).catch((error: unknown) => {
       const inflight = record.inflight
       if (inflight !== undefined) inflight.outputError ??= new Error(String(error))
-      logger.warn(`dsh-acp-interactive: output conversion failed: ${errorChain(error)}`)
+      logger.warn(`dsh-acp-v1: output conversion failed: ${errorChain(error)}`)
     })
   }
 
@@ -544,7 +544,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
           userInvocable: skill.invocation.userInvocable,
         }))
       } catch (error: unknown) {
-        logger.warn(`dsh-acp-interactive: skill catalog unavailable for slash list: ${errorChain(error)}`)
+        logger.warn(`dsh-acp-v1: skill catalog unavailable for slash list: ${errorChain(error)}`)
       }
     }
     return mergeSlashCatalog(commandEntries, skillEntries)
@@ -559,7 +559,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
           deliver(record, commandsUpdate(entries))
         })
         .catch((error: unknown) => {
-          logger.warn(`dsh-acp-interactive: slash catalog announcement failed: ${errorChain(error)}`)
+          logger.warn(`dsh-acp-v1: slash catalog announcement failed: ${errorChain(error)}`)
         })
     }, 0)
   }
@@ -677,7 +677,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         try {
           await notify({ sessionId: record.id, update: configOptionsUpdate(await refreshConfigOptions(record)) })
         } catch (error: unknown) {
-          logger.warn(`dsh-acp-interactive: config options hot refresh failed: ${errorChain(error)}`)
+          logger.warn(`dsh-acp-v1: config options hot refresh failed: ${errorChain(error)}`)
         }
       })
     }
@@ -710,7 +710,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       try {
         await sessions.flush(record.agent.session)
       } catch (error: unknown) {
-        logger.warn(`dsh-acp-interactive: persistence flush failed on close: ${String(error)}`)
+        logger.warn(`dsh-acp-v1: persistence flush failed on close: ${String(error)}`)
       }
       record.closed = true
     })()
@@ -755,7 +755,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         ...(reasoning?.defaultEffort !== undefined ? { defaultEffort: reasoning.defaultEffort } : {}),
       }
     } catch (error: unknown) {
-      logger.warn(`dsh-acp-interactive: reasoning catalog for ${provider}/${model} failed: ${String(error)}`)
+      logger.warn(`dsh-acp-v1: reasoning catalog for ${provider}/${model} failed: ${String(error)}`)
       return undefined
     }
   }
@@ -774,7 +774,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         try {
           models = (await llm.listModels(provider.id)) as CatalogProvider['models']
         } catch (error: unknown) {
-          logger.warn(`dsh-acp-interactive: model catalog for ${provider.id} failed: ${String(error)}`)
+          logger.warn(`dsh-acp-v1: model catalog for ${provider.id} failed: ${String(error)}`)
         }
         catalog.push({ id: provider.id, name: provider.name, models })
       }
@@ -791,7 +791,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         })
       }
     } catch (error: unknown) {
-      logger.warn(`dsh-acp-interactive: provider catalog failed: ${String(error)}`)
+      logger.warn(`dsh-acp-v1: provider catalog failed: ${String(error)}`)
     }
     const reasoning = await reasoningFor(current.provider, current.model)
     // Remember exactly which efforts the current model honors so a stale
@@ -1002,7 +1002,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       // lose the reply to a client that closes stdin right after its
       // requests (design.zh.md §6.1 immediate-EOF smoke).
       void sessions.flush(record.agent.session).catch((error: unknown) => {
-        logger.warn(`dsh-acp-interactive: background persistence flush failed: ${String(error)}`)
+        logger.warn(`dsh-acp-v1: background persistence flush failed: ${String(error)}`)
       })
       // Slash catalog (commands + user-invocable skills): deferred past the
       // session/new response — Zed ignores notifications for session ids it
@@ -1072,32 +1072,32 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   const deletePersisted = (header: { id: SessionId; cwd?: string }): void => {
     if (persistence === undefined) return
     if (header.cwd === undefined || header.cwd.length === 0) {
-      logger.warn(`dsh-acp-interactive: durable delete skipped: session cwd is unknown`)
+      logger.warn(`dsh-acp-v1: durable delete skipped: session cwd is unknown`)
       return
     }
     let location
     try {
       location = persistence.locate(header as { id: SessionId })
     } catch (error: unknown) {
-      logger.warn(`dsh-acp-interactive: persistence locate failed: ${errorChain(error)}`)
+      logger.warn(`dsh-acp-v1: persistence locate failed: ${errorChain(error)}`)
       return
     }
     if (location === undefined) return
     const sessionsRoot = join(resolveDshHome(), 'sessions')
     const artifact = location.path
     if (!artifact.startsWith(sessionsRoot)) {
-      logger.warn(`dsh-acp-interactive: refusing to delete artifact outside the sessions root: ${artifact}`)
+      logger.warn(`dsh-acp-v1: refusing to delete artifact outside the sessions root: ${artifact}`)
       return
     }
     const sessionDir = dirname(artifact)
     if (!/^(session-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(basename(sessionDir))) {
-      logger.warn(`dsh-acp-interactive: refusing to delete unexpected artifact layout: ${artifact}`)
+      logger.warn(`dsh-acp-v1: refusing to delete unexpected artifact layout: ${artifact}`)
       return
     }
     try {
       rmSync(sessionDir, { recursive: true, force: true })
     } catch (error: unknown) {
-      logger.warn(`dsh-acp-interactive: durable delete failed: ${errorChain(error)}`)
+      logger.warn(`dsh-acp-v1: durable delete failed: ${errorChain(error)}`)
     }
   }
 
@@ -1450,7 +1450,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     stdinEnded = true
     tryQuietClose()
   })().catch((error: unknown) => {
-    logger.warn(`dsh-acp-interactive: stdin read failed: ${errorChain(error)}`)
+    logger.warn(`dsh-acp-v1: stdin read failed: ${errorChain(error)}`)
   })
   conn = new AgentSideConnection(
     (connection) => {
@@ -1493,7 +1493,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       }
       if (failures.length > 0) {
         const detail = failures.map((failure) => errorChain(failure)).join('; ')
-        throw new AggregateError(failures, `dsh-acp-interactive: teardown failed for ${failures.length} session(s): ${detail}`)
+        throw new AggregateError(failures, `dsh-acp-v1: teardown failed for ${failures.length} session(s): ${detail}`)
       }
     })()
     return quiescing
@@ -1509,7 +1509,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   const appExit = ctx.get('appExit') as ((code?: number) => void) | undefined
   let exitStarted = false
   void conn.closed.catch((error: unknown) => {
-    logger.warn(`dsh-acp-interactive: connection closed with an error: ${String(error)}`)
+    logger.warn(`dsh-acp-v1: connection closed with an error: ${String(error)}`)
   }).then(async () => {
     await quiesce()
     if (appExit !== undefined && !exitStarted) {
@@ -1517,9 +1517,9 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       appExit(0)
     }
   }).catch((error: unknown) => {
-    logger.warn(`dsh-acp-interactive: connection-close teardown failed: ${errorChain(error)}`)
+    logger.warn(`dsh-acp-v1: connection-close teardown failed: ${errorChain(error)}`)
   })
-  ctx.effect(() => quiesce, 'dsh-acp-interactive.connection')
+  ctx.effect(() => quiesce, 'dsh-acp-v1.connection')
 
   // ── elicitation: dsh ask_user_question <-> ACP form ───────────────────────
   // One active answerer per context (user-questions seam). A form is only

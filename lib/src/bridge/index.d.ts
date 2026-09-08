@@ -2,7 +2,7 @@ import Schema from "@deepseek-ai/schemastery";
 import { Context } from "@deepseek-ai/cordis";
 //#region src/bridge/index.d.ts
 /** Stable cordis plugin name (design.zh.md §5). */
-declare const name = "dsh-acp-interactive";
+declare const name = "dsh-acp-v1";
 /** Agent spine services this bridge programs (validated on the rc.2 baseline). */
 declare const inject: string[];
 /** Deployment route defaults; per-session config options may override. */

@@ -1,6 +1,6 @@
-# dsh-acp-interactive
+# dsh-acp-v1
 
-> **dsh-acp-interactive is, at heart, a dsh plugin**: it supplies the ACP
+> **dsh-acp-v1 is, at heart, a dsh plugin**: it supplies the ACP
 > capabilities missing from dsh's built-in ACP, and serves the DeepSeek
 > Harness to the [Zed](https://zed.dev) editor as a custom ACP agent-server
 > extension (an interactive ACP v1 server).

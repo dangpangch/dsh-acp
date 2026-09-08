@@ -1,4 +1,4 @@
-// dsh-acp-interactive: slash-catalog merge — dsh command-plane entries plus
+// dsh-acp-v1: slash-catalog merge — dsh command-plane entries plus
 // user-invocable skills, folded into the ACP `available_commands_update` list.
 //
 // Zed 1.18 only shows client-side (global/project) skills for native-agent

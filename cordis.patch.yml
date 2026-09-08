@@ -1,4 +1,4 @@
-# dsh-acp-interactive bundle patch: the interactive ACP (Agent Client
+# dsh-acp-v1 bundle patch: the interactive ACP (Agent Client
 # Protocol) v1 surface for the DeepSeek Harness, applied as ONE insert over a
 # profile rooted on @deepseek-ai/dsh-base (which owns llm/session/agents/
 # sandbox/tools/commands/persistence rows...). The bridge itself is exported by
@@ -43,8 +43,8 @@
     # once the tree settles and drives ctx.agents sessions. provider/model are
     # the shipped route defaults; clients may switch per session through
     # configOptions.
-    - id: dsh-acp-interactive
-      name: 'dsh-acp-interactive'
+    - id: dsh-acp-v1
+      name: 'dsh-acp-v1'
       config:
         provider: deepseek-official
         model: deepseek-v4-flash

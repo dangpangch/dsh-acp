@@ -1,4 +1,4 @@
-# 技术文档（docs/design.zh.md）· dsh-acp-interactive
+# 技术文档（docs/design.zh.md）· dsh-acp-v1
 
 > 交付与使用（安装、Zed `settings.json`、冒烟）见仓库根 README；本文是**唯一
 > 的技术/设计文档**，合并原 decisions 决策记录与安装手册中的技术部分。源码
@@ -6,7 +6,7 @@
 
 ## 1. 定位
 
-dsh-acp-interactive **本质上是一个 dsh plugin**（dsh bundle 包，声明
+dsh-acp-v1 **本质上是一个 dsh plugin**（dsh bundle 包，声明
 `dsh.bundle.patch: cordis.patch.yml`），目的：
 
 - 补足 **dsh 原生 ACP 缺失的能力**：官方 `@deepseek-ai/dsh-acp` 是
@@ -20,7 +20,7 @@ dsh-acp-interactive **本质上是一个 dsh plugin**（dsh bundle 包，声明
 ### 2.1 bundle 组合
 
 - profile `package.json` 的 `dsh.profile.bundles`：`@deepseek-ai/dsh-base` +
-  `dsh-acp-interactive`（按序作为补丁层）。
+  `dsh-acp-v1`（按序作为补丁层）。
 - `cordis.patch.yml` 一行一个补丁（`- insert:` 追加行 / `{id, config}` 替换整
   行 config）：
   - `system-prompt`：ACP 会话专属简洁编码 persona（含 sandbox 提示、验证工作
@@ -29,7 +29,7 @@ dsh-acp-interactive **本质上是一个 dsh plugin**（dsh bundle 包，声明
   - `agent-presets`（`@deepseek-ai/dsh-agent-presets`，`default: standard`）：
     每个 ACP agent 由 preset 组合；dsh CLI profile boot 自动补 shipped preset
     root，独立 dev boot 须自带 roots（fixture overlay）；
-  - `dsh-acp-interactive`：bridge 行（provider `deepseek-official` / model
+  - `dsh-acp-v1`：bridge 行（provider `deepseek-official` / model
     `deepseek-v4-flash`，客户端可经 configOptions 逐会话切换）。
 - dsh-base 提供全部宿主行（llm / agents / sessions / persistence /
   session-query / projection / approval / sandbox / commands / 工具注册 /

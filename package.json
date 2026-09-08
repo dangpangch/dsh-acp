@@ -1,6 +1,6 @@
 {
-  "name": "dsh-acp-interactive",
-  "version": "0.2.0",
+  "name": "dsh-acp-v1",
+  "version": "0.3.0",
   "description": "Interactive ACP (Agent Client Protocol) v1 plugin for the DeepSeek Harness (dsh): run dsh agents in Zed's Agent Panel as a dsh bundle plugin.",
   "private": true,
   "license": "MIT",
@@ -61,7 +61,7 @@
     "@deepseek-ai/dsh-app-boot": "0.1.2-rc.1",
     "@deepseek-ai/dsh-base": "0.1.2-rc.1",
     "@types/node": "^22.10.0",
-    "dsh-acp-interactive": "link:.",
+    "dsh-acp-v1": "link:.",
     "tsdown": "^0.22.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",

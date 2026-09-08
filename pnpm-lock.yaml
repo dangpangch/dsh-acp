@@ -60,7 +60,7 @@ importers:
       '@types/node':
         specifier: ^22.10.0
         version: 22.20.1
-      dsh-acp-interactive:
+      dsh-acp-v1:
         specifier: link:.
         version: 'link:'
       tsdown:
