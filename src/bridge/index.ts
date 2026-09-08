@@ -90,7 +90,7 @@ import {
   toolCallDiffContent,
   usageUpdate,
 } from './updates.js'
-import { codedError, ELICITATION_ABORTED, ELICITATION_CANCELLED, ELICITATION_DECLINED, ELICITATION_NO_SESSION, ELICITATION_UNSUPPORTED } from './errors.js'
+import { askViaForm, type ElicitationBridge } from './elicitation.js'
 import { replayUpdatesForEvent } from './replay.js'
 import { mergeSlashCatalog, normalizeSkillSlashText, type SlashCatalogEntry, type SlashCommandEntry, type SlashSkillEntry } from './catalog.js'
 import { diffForToolCall, displayRawInput, rawInputOf, resultBody, toolCallLocation, toolCallTitle, toolKindFor, toolResultCall } from './tool-cards.js'
@@ -1615,57 +1615,15 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   ctx.effect(() => quiesce, 'dsh-acp-v1.connection')
 
   // ── elicitation: dsh ask_user_question <-> ACP form ───────────────────────
-  // One active answerer per context (user-questions seam). A form is only
-  // attempted when the client declared `clientCapabilities.elicitation.form`;
-  // otherwise the answerer rejects immediately so the ask tool reports the
-  // failure to the model instead of hanging the turn (design §6.4).
-  //
-  // dsh 0.1.2 answers questions through the Agent-scoped
-  // `user-questions/request` waterfall (an untagged root listener is admitted
-  // for every agent-scoped dispatch, so one bridge listener covers all
-  // sessions and keys by `request.agent` itself).
-  const askViaForm = async (request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer> => {
-    const agent = request.agent
-    const record = agent !== undefined ? store.get(agent.session.id) : undefined
-    if (record === undefined || record.closed || conn === undefined) {
-      throw codedError(ELICITATION_NO_SESSION, 'no live ACP session for this question')
-    }
-    if (!elicitationFormsEnabled()) {
-      throw codedError(ELICITATION_UNSUPPORTED, 'this ACP client does not support elicitation forms; answer the question inline instead')
-    }
-    const signal = request.signal
-    if (signal !== undefined && signal.aborted) throw codedError(ELICITATION_ABORTED, 'question aborted')
-    const callId = askCall.get(record.id)
-    let outcome
-    try {
-      outcome = await conn.createElicitation(elicitationRequestFor(request, record.id, callId))
-    } finally {
-      askCall.delete(record.id)
-    }
-    if (outcome.action === 'decline') throw codedError(ELICITATION_DECLINED, 'the user declined the question')
-    if (outcome.action === 'cancel') throw codedError(ELICITATION_CANCELLED, 'the question was cancelled')
-    let content: Record<string, unknown> = {}
-    if (outcome.action === 'accept' && outcome.content !== undefined && outcome.content !== null) {
-      content = outcome.content as Record<string, unknown>
-    }
-    const answers: AskUserQuestionAnswer['answers'] = []
-    for (const item of request.questions) {
-      const value = content[item.id]
-      const other = content[`${item.id}__other`]
-      const hasOptions = (item.options ?? []).length > 0
-      const selected = value === undefined ? [] : Array.isArray(value) ? value.map(String) : [String(value)]
-      answers.push({
-        id: item.id,
-        selected: hasOptions ? selected : [],
-        ...(typeof other === 'string' && other.length > 0
-          ? { custom: other }
-          : (!hasOptions && typeof value === 'string' && value.length > 0 ? { custom: value } : {})),
-      })
-    }
-    return { answers }
-  }
-
+  // askViaForm lives in elicitation.ts (P0-3b: unit-testable five exits);
+  // this listener only claims bridge-owned sessions and delegates the rest.
   if (userQuestions !== undefined) {
+    const elicitation: ElicitationBridge = {
+      store,
+      askCall,
+      getConn: () => conn,
+      formsEnabled: elicitationFormsEnabled,
+    }
     // Waterfall generation: claim our own sessions' questions and delegate
     // everything else (`next()`), so a foreign asker still reaches any local
     // answerer composed elsewhere in the host.
@@ -1676,7 +1634,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       const agent = request.agent
       const record = agent !== undefined ? store.get(agent.session.id) : undefined
       if (record === undefined) return next()
-      return askViaForm(request)
+      return askViaForm(request, elicitation)
     }) as never)
   }
 }
