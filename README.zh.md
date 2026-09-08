@@ -117,7 +117,8 @@ sessionId），随后 exit 0。
 明确不做（不悬空声明）：session fork、terminal/fs **执行委托**（命令只在 dsh
 沙箱内执行——客户端只把已捕获的输出渲染成卡片内容，绝不执行 agent 的命令）、
 `additionalDirectories`、audio/embeddedContext、MCP 挂载（非空
-`mcpServers` 拒绝并说明）、细粒度 diff 卡片、Windows。
+`mcpServers` 接受但忽略——不挂载任何 MCP 工具，stderr 记一条）、细粒度 diff
+卡片、Windows。
 
 ## 预设与模型路由（部署字段）
 

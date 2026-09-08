@@ -983,8 +983,11 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     if (params.additionalDirectories !== undefined && params.additionalDirectories !== null && params.additionalDirectories.length > 0) {
       throw invalidParams('additionalDirectories is not supported')
     }
+    // Real clients (Zed) forward `mcpServers` unconditionally. The bridge
+    // mounts no MCP tools, so the honest handling is accept-and-ignore with a
+    // stderr note — rejecting turns 'not supported' into 'unusable' (P1-6).
     if (params.mcpServers !== undefined && params.mcpServers !== null && params.mcpServers.length > 0) {
-      throw invalidParams('mcpServers is not supported')
+      logger.warn(`dsh-acp-v1: mcpServers accepted but ignored (${params.mcpServers.length} server(s)); no MCP tools are mounted`)
     }
   }
 

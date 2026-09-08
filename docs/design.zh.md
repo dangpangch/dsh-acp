@@ -179,8 +179,9 @@ dsh-acp-v1 **本质上是一个 dsh plugin**（dsh bundle 包，声明
 Windows。`embeddedContext` 虽不声明（embedded resource 不是一等 prompt 输
 入），但 `resource` 块会**优雅降级**为纯文本继续跑（§3.2），而非拒绝整个
 prompt。diff 卡片与 locations 属于 `tool_call`/`tool_call_update` 的可选字
-段，无需能力声明（§3.4）。MCP：非空 `mcpServers` → `invalidParams`（如实
-拒绝，本轮不做）。
+段，无需能力声明（§3.4）。MCP：非空 `mcpServers` → **接受并忽略**（不挂载
+任何 MCP 工具，stderr 记日志；真实客户端 Zed 会转发该字段，拒绝把"不支持"
+升级成"不可用"，P1-6）。
 
 ## 4. 会话历史与回放（durable history）
 
@@ -217,7 +218,7 @@ prompt。diff 卡片与 locations 属于 `tool_call`/`tool_call_update` 的可�
 | elicitation | userQuestions provider + createElicitation（client capability 门控） |
 | 权限档 | config option `permission`（permissionPresets.set） |
 | 预设/路由 | 部署字段：`DSH_ACP_PRESET`/`DSH_ACP_PROVIDER`/`DSH_ACP_MODEL` 由桥在会话/agent 创建时读取（改 env 需重启）。预设=工具集，**不进会话选择器**（中途换会破坏 session 语义）；newSession 对无 root 供给的取值回 invalidParams 并列出可用预设（P1-4）。patch 行保持字面量默认值——本走廊 loader 对 patch 行 `!!js` 的求值时机不可依赖（cnctem 的 `!!js` 写法属其 rc.2 走廊，未在本走廊复现），故由桥代码统一处理 env |
-| MCP | 本轮不做：非空 mcpServers → invalidParams |
+| MCP | 不挂载：非空 mcpServers → 接受并忽略（stderr 记录；拒绝会把 Zed 的正常请求变不可用，P1-6） |
 | 能力纪律 | 先实现、后声明（list/load/delete/resume 随实现同步开启） |
 
 ## 6. 验证与验收

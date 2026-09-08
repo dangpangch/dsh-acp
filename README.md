@@ -131,8 +131,9 @@ Honestly **not** implemented (never advertised): session fork, delegated
 terminal/fs **execution** (commands run only in the dsh sandbox — the client
 renders captured output as card content, it never executes the agent's
 command), `additionalDirectories`,
-audio/embeddedContext, MCP mounting (non-empty `mcpServers` is rejected with an
-explanation), fine-grained diff cards, Windows.
+audio/embeddedContext, MCP mounting (non-empty `mcpServers` is accepted and
+ignored — no MCP tools are mounted, noted on stderr), fine-grained diff
+cards, Windows.
 
 ## Presets & model route (deployment fields)
 

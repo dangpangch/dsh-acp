@@ -119,7 +119,12 @@ const client = connect(join(here, 'wire-probe.mjs'), { DSH_HOME: home, WIRE_WS: 
 
   // ── session/new + config options ──────────────────────────────────────────
   step('session/new')
-  const created = await call('session/new', { cwd: ws, mcpServers: [] })
+  // session/new carries a NON-EMPTY mcpServers list — real clients (Zed)
+  // forward it; the bridge must accept-and-ignore, not reject (P1-6).
+  const created = await call('session/new', {
+    cwd: ws,
+    mcpServers: [{ name: 'probe-mcp', command: '/bin/true', args: [], env: [] }],
+  })
   check(validate(z.zNewSessionResponse, 'session/new', created), 'session/new schema')
   const sessionId = created.sessionId
   check(typeof sessionId === 'string' && sessionId.length > 0, 'session/new', 'no sessionId')
