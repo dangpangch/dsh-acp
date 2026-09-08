@@ -112,15 +112,13 @@ sessionId), then exit 0.
   popup), commands keep plain names; picking one loads the skill body through
   dsh's `tool-skill` pre-step.
 - Command output display (Zed 1.18): Zed renders execute-kind cards as
-  terminal cards whose text content stays hidden behind a hover-only
-  expander — when the client declares `clientCapabilities.terminal`, each
-  bash/pwsh result is echoed through a client terminal
-  (`terminal/create` → embed `{type:'terminal'}` → `terminal/release`) so the
-  card shows the output like a native Zed terminal card (auto-expanded per
-  `expand_terminal_card`). dsh still runs the command under its own
-  sandbox/approval — the client terminal only displays the captured text.
-  Without the capability (or on any failure) the card falls back to plain
-  text content.
+  terminal-style cards whose text content hides behind a hover-only chevron
+  (an external agent cannot force them open), so every bash/pwsh result is
+  delivered as a read-style card: the title carries the model-written command
+  description (the raw command line stays in rawInput) and the captured
+  output rides as fenced text content in the `tool_call_update`, folding with
+  the card. Commands run under dsh's own sandbox/approval; nothing is ever
+  executed inside the client.
 - Session options: Model, Thought Level, Write permission.
 - Permissions: one-shot `session/request_permission` (allow-once /
   reject-once).
@@ -130,8 +128,8 @@ sessionId), then exit 0.
   `elicitation.form`).
 
 Honestly **not** implemented (never advertised): session fork, delegated
-terminal/fs **execution** (tools stay in the dsh sandbox — the client terminal
-above only displays already-captured output, it never runs the agent's
+terminal/fs **execution** (commands run only in the dsh sandbox — the client
+renders captured output as card content, it never executes the agent's
 command), `additionalDirectories`,
 audio/embeddedContext, MCP mounting (non-empty `mcpServers` is rejected with an
 explanation), fine-grained diff cards, Windows.
@@ -142,7 +140,7 @@ explanation), fine-grained diff cards, Windows.
 pnpm install
 pnpm typecheck   # tsc --noEmit
 pnpm build       # tsdown -> lib/
-pnpm test        # vitest (89 tests incl. spawned frame-purity + history probes)
+pnpm test        # vitest (136 tests incl. spawned frame-purity + history probes)
 node scripts/history-probe.mjs   # session history end-to-end (isolated DSH_HOME)
 ```
 

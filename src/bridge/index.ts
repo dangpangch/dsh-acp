@@ -90,6 +90,7 @@ import {
   toolCallDiffContent,
   usageUpdate,
 } from './updates.js'
+import { codedError, ELICITATION_ABORTED, ELICITATION_CANCELLED, ELICITATION_DECLINED, ELICITATION_NO_SESSION, ELICITATION_UNSUPPORTED } from './errors.js'
 import { replayUpdatesForEvent } from './replay.js'
 import { mergeSlashCatalog, normalizeSkillSlashText, type SlashCatalogEntry, type SlashCommandEntry, type SlashSkillEntry } from './catalog.js'
 import { diffForToolCall, displayRawInput, rawInputOf, resultBody, toolCallLocation, toolCallTitle, toolKindFor, toolResultCall } from './tool-cards.js'
@@ -1535,13 +1536,13 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     const agent = request.agent
     const record = agent !== undefined ? store.get(agent.session.id) : undefined
     if (record === undefined || record.closed || conn === undefined) {
-      throw new Error('no live ACP session for this question')
+      throw codedError(ELICITATION_NO_SESSION, 'no live ACP session for this question')
     }
     if (!elicitationFormsEnabled()) {
-      throw new Error('this ACP client does not support elicitation forms; answer the question inline instead')
+      throw codedError(ELICITATION_UNSUPPORTED, 'this ACP client does not support elicitation forms; answer the question inline instead')
     }
     const signal = request.signal
-    if (signal !== undefined && signal.aborted) throw new Error('question aborted')
+    if (signal !== undefined && signal.aborted) throw codedError(ELICITATION_ABORTED, 'question aborted')
     const callId = askCall.get(record.id)
     let outcome
     try {
@@ -1549,8 +1550,8 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     } finally {
       askCall.delete(record.id)
     }
-    if (outcome.action === 'decline') throw new Error('the user declined the question')
-    if (outcome.action === 'cancel') throw new Error('the question was cancelled')
+    if (outcome.action === 'decline') throw codedError(ELICITATION_DECLINED, 'the user declined the question')
+    if (outcome.action === 'cancel') throw codedError(ELICITATION_CANCELLED, 'the question was cancelled')
     let content: Record<string, unknown> = {}
     if (outcome.action === 'accept' && outcome.content !== undefined && outcome.content !== null) {
       content = outcome.content as Record<string, unknown>
