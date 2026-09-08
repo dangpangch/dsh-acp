@@ -155,4 +155,5 @@ decision tables), `src/dev-bin.ts` (isolated dev/test boot),
 ## Docs & license
 
 - Technical design document (Chinese): `docs/design.zh.md`
+- English design summary: `docs/design-summary.en.md`
 - MIT

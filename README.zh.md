@@ -139,4 +139,5 @@ node scripts/history-probe.mjs   # 会话历史端到端（隔离 DSH_HOME）
 ## 文档与许可
 
 - 技术文档（唯一，中文）：`docs/design.zh.md`
+- 英文设计摘要：`docs/design-summary.en.md`
 - MIT
