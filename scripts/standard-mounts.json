@@ -1,0 +1,39 @@
+{
+  "source": "golden baseline of the standard preset mount surface on the 0.1.2-rc.1 corridor (lib/dev-bin.js + DSH_ACP_SNAPSHOT_MOUNTS=1). Regenerate when the corridor or preset roster changes: boot a session under the snapshot gate and copy its sidecar here (see scripts/conformance.mjs mount audit).",
+  "tools": [
+    "ask_user_question",
+    "bash",
+    "create_goal",
+    "edit",
+    "exit_plan_mode",
+    "get_goal",
+    "glob",
+    "grep",
+    "interrupt_agent",
+    "job_kill",
+    "job_list",
+    "job_output",
+    "list_agents",
+    "ralph",
+    "read",
+    "read_image",
+    "send_message",
+    "skill",
+    "str_replace_editor",
+    "subagent",
+    "subagent_fork",
+    "todo_write",
+    "update_goal",
+    "web_fetch",
+    "web_search",
+    "workflow",
+    "write"
+  ],
+  "slash": [
+    "compact",
+    "feedback",
+    "goal",
+    "permission",
+    "plan"
+  ]
+}

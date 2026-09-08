@@ -49,7 +49,7 @@ import { SessionId as brandSessionId, type Session, type SessionEvent, type Sess
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { AskUserQuestionAnswer, AskUserQuestionRequest } from '@deepseek-ai/dsh-user-questions'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
-import { rmSync, readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 
 import type { ContentBlock as AcpContentBlock } from '@agentclientprotocol/sdk'
@@ -133,6 +133,12 @@ const AUTH_ENV_KEY = 'DEEPSEEK_API_KEY'
 const ENV_PRESET = 'DSH_ACP_PRESET'
 const ENV_PROVIDER = 'DSH_ACP_PROVIDER'
 const ENV_MODEL = 'DSH_ACP_MODEL'
+
+/** Test-only mount snapshot gate (P1-5): write the mounted tool/slash surface
+ * of every new session to $DSH_HOME/snapshots/<sessionId>.json for the
+ * conformance harness to diff against the golden baseline. Files, never
+ * stdout — frame purity holds. */
+const ENV_MOUNT_SNAPSHOT = 'DSH_ACP_SNAPSHOT_MOUNTS'
 
 /** Canonical write-permission preset ids (mirrors the dsh-base permission row). */
 const PERMISSION_PRESETS = ['read-only', 'workspace-write', 'danger-full-access'] as const
@@ -623,6 +629,34 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     const host = ctx as unknown as { on(event: string, listener: () => void): unknown }
     host.on('skills/change', refreshAll)
     host.on('commands/change', refreshAll)
+  }
+
+  // ── P1-5 mount audit: env-gated snapshot of a new session's actual
+  // mounted surface (tools via the registry's agent view, slash via the same
+  // announce catalog), written to a sidecar file for the conformance harness.
+  const snapshotMounts = async (record: SessionRecord): Promise<void> => {
+    if (process.env[ENV_MOUNT_SNAPSHOT] === undefined) return
+    try {
+      const toolsService = ctx.get('tools') as
+        | { schemas(scope?: unknown): readonly { readonly name: string }[] }
+        | undefined
+      const toolNames = [...(toolsService?.schemas(record.agent) ?? [])]
+        .map((tool) => tool.name)
+        .sort()
+      // Command-plane names only: user skills under ~/.agents/skills are
+      // host-environment content and would make the baseline machine-specific.
+      const commandNames = [...(commands?.list(record.agent) ?? [])]
+        .map((command) => command.name)
+        .sort()
+      const dir = join(resolveDshHome(), 'snapshots')
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(
+        join(dir, `${record.id}.json`),
+        JSON.stringify({ sessionId: record.id, tools: toolNames, slash: commandNames }, null, 2),
+      )
+    } catch (error: unknown) {
+      logger.warn(`dsh-acp-v1: mount snapshot failed: ${errorChain(error)}`)
+    }
   }
 
   // ── dsh event firehose -> wire updates ────────────────────────────────────
@@ -1239,7 +1273,9 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         await handle.dispose().catch(() => {})
         throw internalError('connection closed during session/new')
       }
-      const configOptions = await registerRecord(makeRecord(sessionId, params.cwd, handle, selection))
+      const record = makeRecord(sessionId, params.cwd, handle, selection)
+      const configOptions = await registerRecord(record)
+      await snapshotMounts(record)
       return { sessionId, configOptions }
     },
 

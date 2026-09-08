@@ -13,11 +13,12 @@
 // agent_thought_chunk, tool_call, tool_call_update, plan,
 // available_commands_update, usage_update when projections report pressure),
 // session/request_permission, elicitation/create.
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { connect } from './acp-client.mjs'
+import { compareMounts, mountMatrixText } from './mount-matrix.mjs'
 
 const zodPath = new URL('../node_modules/@agentclientprotocol/sdk/dist/schema/zod.gen.js', import.meta.url)
 const z = await import(zodPath.href)
@@ -79,7 +80,7 @@ const call = async (method, params) => {
   return result
 }
 
-const client = connect(join(here, 'wire-probe.mjs'), { DSH_HOME: home, WIRE_WS: ws }, [], (frame, reply) => {
+const client = connect(join(here, 'wire-probe.mjs'), { DSH_HOME: home, WIRE_WS: ws, DSH_ACP_SNAPSHOT_MOUNTS: '1' }, [], (frame, reply) => {
   const validator = CLIENT_METHOD_VALIDATORS[frame.method]
   check(validator !== undefined, `unexpected client request method: ${frame.method}`)
   if (validator !== undefined) {
@@ -131,6 +132,17 @@ const client = connect(join(here, 'wire-probe.mjs'), { DSH_HOME: home, WIRE_WS: 
   for (const option of created.configOptions ?? []) {
     validate(z.zSessionConfigOption, `session/new config option ${option.id}`, option)
   }
+
+  // ── P1-5 mount audit: the env-gated sidecar snapshot of this session's
+  // actual mounted surface must equal the golden baseline exactly — any tool
+  // or slash entry outside it is a host-plane leak. (Sidecar files, never
+  // stdout: frame purity holds.)
+  const snapshotPath = join(home, 'snapshots', `${sessionId}.json`)
+  const snapshot = JSON.parse(readFileSync(snapshotPath, 'utf8'))
+  const golden = JSON.parse(readFileSync(join(here, 'standard-mounts.json'), 'utf8'))
+  const mountProblems = compareMounts(golden, snapshot)
+  check(mountProblems.length === 0, 'mount audit vs golden baseline',
+    mountProblems.length > 0 ? `\n${mountProblems.map((p) => `  - ${p}`).join('\n')}` : '')
 
   // ── set_config_option: thought_level / permission ─────────────────────────
   // The bridge advertises thought_level only when the model declares reasoning
@@ -217,6 +229,8 @@ const client = connect(join(here, 'wire-probe.mjs'), { DSH_HOME: home, WIRE_WS: 
   for (const [method, count] of [...seenMethods].sort()) console.log(`${count}× ${method}`)
   console.log('== session/update variants exercised ==')
   for (const [variant, count] of [...seenUpdateVariants].sort()) console.log(`${count}× ${variant}`)
+  console.log('== mount audit matrix (this run vs scripts/standard-mounts.json) ==')
+  console.log(mountMatrixText(golden, snapshot))
 
   if (failures.length > 0) {
     console.error(`\nCONFORMANCE FAIL (${failures.length}):`)
