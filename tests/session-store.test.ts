@@ -1,8 +1,9 @@
 // session-store: single-flight prompt slot, the registry identity guard, and
-// the durable model-selection fold (design.zh.md §6.2/§6.3 primitives).
+// the durable model-selection / agent-preset folds (design.zh.md
+// §6.2/§6.3 primitives).
 import { describe, expect, it } from 'vitest'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import { createInflight, lastModelSelection, lastSessionTitle, makeRecord, removeRecord, sessionDirForDelete, type PromptInflight, type SessionRecord } from '../src/bridge/session-store.js'
+import { createInflight, hasStartedTurn, lastAgentPreset, lastModelSelection, lastSessionTitle, makeRecord, removeRecord, sessionDirForDelete, type PromptInflight, type SessionRecord } from '../src/bridge/session-store.js'
 
 /** Minimal session event fixture (seq/time are irrelevant to the fold). */
 const event = (type: string, data: unknown): SessionEvent => ({ type, seq: 0, time: 0, data }) as never
@@ -150,5 +151,62 @@ describe('lastSessionTitle (durable title fold)', () => {
       event('turn/start', { turn: 0 }),
       event('session/title', { title: 'renamed', messageSeqs: [], source: { kind: 'user' } }),
     ])).toBe('renamed')
+  })
+})
+
+describe('lastAgentPreset (durable preset fold)', () => {
+  it('returns undefined for logs without a preset selection', () => {
+    expect(lastAgentPreset([])).toBeUndefined()
+    expect(lastAgentPreset([
+      event('turn/start', { turn: 0 }),
+      event('model/selection', { provider: 'pi-ai', model: 'claude-x' }),
+    ])).toBeUndefined()
+  })
+
+  it('restores the latest pick, later selections winning over earlier ones', () => {
+    expect(lastAgentPreset([
+      event('agent-preset/selected', { agentPreset: 'ptc' }),
+      event('turn/start', { turn: 0 }),
+      event('agent-preset/selected', { agentPreset: 'cordis' }),
+    ])).toBe('cordis')
+  })
+})
+
+describe('hasStartedTurn (preset lock boundary)', () => {
+  it('is false for a blank session, where a preset switch is still allowed', () => {
+    expect(hasStartedTurn([])).toBe(false)
+    expect(hasStartedTurn([
+      event('agent-preset/selected', { agentPreset: 'ptc' }),
+      event('model/selection', { provider: 'pi-ai', model: 'claude-x' }),
+    ])).toBe(false)
+  })
+
+  it('is true once any turn started, even after it ended', () => {
+    expect(hasStartedTurn([
+      event('turn/start', { turn: 0 }),
+      event('turn/end', { turn: 0, reason: { kind: 'completed' } }),
+    ])).toBe(true)
+  })
+})
+
+describe('makeRecord (preset seeding)', () => {
+  const build = (init?: { agentPreset?: string; turnStarted?: boolean }): SessionRecord => makeRecord(
+    'id' as never,
+    '/ws',
+    { agent: {} as never, dispose: () => Promise.resolve() },
+    { current: undefined, assembled: undefined },
+    init,
+  )
+
+  it('defaults to no preset and no turn', () => {
+    const record = build()
+    expect(record.agentPreset).toBeUndefined()
+    expect(record.turnStarted).toBe(false)
+  })
+
+  it('carries the mounted preset and the lock state of a resumed session', () => {
+    const record = build({ agentPreset: 'cordis', turnStarted: true })
+    expect(record.agentPreset).toBe('cordis')
+    expect(record.turnStarted).toBe(true)
   })
 })

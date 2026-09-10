@@ -170,10 +170,17 @@ dsh-acp-v1 **本质上是一个 dsh plugin**（dsh bundle 包，声明
   `skills/change` / `commands/change` 实时重通告。
 - **skill 执行**：prompt 文本归一化 `/skill:<name>` → `/name`（§3.2），进入
   dsh tool-skill pre-step 展开（与 dsh Web "/" 选 skill 同路径，非命令平面）。
-- **configOptions**：Model / Thought Level / Write permission 三个 select，
-  数据源 `ctx.llm.listProviders/listModels/resolveModelInfo` +
+- **configOptions**：Preset / Model / Thought Level / Write permission 四个
+  select，数据源 `ctx.agentPresets.list/select` +
+  `ctx.llm.listProviders/listModels/resolveModelInfo` +
   `ctx.permissionPresets.resolve/optionOf/set`；`permission` 写会话授权档
-  （read-only / workspace-write / danger-full-access）。
+  （read-only / workspace-write / danger-full-access）。`preset` 只在会话尚未产生
+  turn 时通告：dsh 的 `select` 是父作用域 re-link（`recompose` + `tools/change`），
+  并且对已开始的会话抛 `agent-preset/locked`（读 `turnBoundary` 投影），所以桥在
+  首个 `turn/start` 用全量替换的 `config_option_update` 撤下该项——通告面与实际可
+  行能力一致；切换成功后重通告斜杠目录（skill/命令面随预设变化），load/resume 由
+  日志里最后一条 `agent-preset/selected` 折叠出要挂载的预设（header 是创建事实，
+  切换后不再代表当前组合）。
 - **权限**：`approval/request`（带 callId 的桥内请求）→ ACP
   `session/request_permission`（allow-once / allow-always / reject-once 三个选项），
   结果映射 `allowed-once` / `rejected` / `cancelled`；allow-always 由桥记录在
@@ -230,7 +237,7 @@ prompt。diff 卡片与 locations 属于 `tool_call`/`tool_call_update` 的可�
 | resource 块 | 不声明 embeddedContext，但优雅降级为纯文本（pi-acp 同款，见 §3.2） |
 | elicitation | userQuestions provider + createElicitation（client capability 门控） |
 | 权限档 | config option `permission`（permissionPresets.set） |
-| 预设/路由 | 部署字段：`DSH_ACP_PRESET`/`DSH_ACP_PROVIDER`/`DSH_ACP_MODEL` 由桥在会话/agent 创建时读取（改 env 需重启）。预设=工具集，**不进会话选择器**（中途换会破坏 session 语义）；newSession 对无 root 供给的取值回 invalidParams 并列出可用预设（P1-4）。patch 行保持字面量默认值——本走廊 loader 对 patch 行 `!!js` 的求值时机不可依赖（cnctem 的 `!!js` 写法属其 rc.2 走廊，未在本走廊复现），故由桥代码统一处理 env |
+| 预设/路由 | 部署默认：`DSH_ACP_PRESET`/`DSH_ACP_PROVIDER`/`DSH_ACP_MODEL` 由桥在会话/agent 创建时读取（改 env 需重启）。预设**是空白会话的会话选项**（config option `preset`，`agentPresets.select`）：首个 turn 前可切，`turn/start` 时撤下选择器、之后回 invalidParams（dsh `agent-preset/locked`）；新建会话对无 root 供给的默认值回 invalidParams 并列出可用预设（P1-4）。patch 行保持字面量默认值——本走廊 loader 对 patch 行 `!!js` 的求值时机不可依赖（cnctem 的 `!!js` 写法属其 rc.2 走廊，未在本走廊复现），故由桥代码统一处理 env |
 | MCP | 不挂载：非空 mcpServers → 接受并忽略（stderr 记录；拒绝会把 Zed 的正常请求变不可用，P1-6） |
 | 能力纪律 | 先实现、后声明（list/load/delete/resume 随实现同步开启） |
 | 走廊基线 | 精确钉 `0.1.5-rc.1`（单 cohort，无混合 peer）。迁移账本与证据见 `docs/compat-audit-0.1.5-rc.1.zh.md`；`scripts/standard-mounts.json` 随预设名册再基线化（−str_replace_editor，+present）。0.1.2-rc.1→0.1.5-rc.1 段在本地升级技能里无版本卡（卡片止于 rc.1），结论由已发布产物 + 声明面对照 + 可复现实测派生，属**已声明的缺口段** |

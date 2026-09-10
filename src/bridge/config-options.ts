@@ -117,6 +117,64 @@ export function permissionSelectOptions(names: readonly string[]) {
   return names.map((name) => ({ value: name, name: permissionLabel(name), description: null }))
 }
 
+/** One roster row the preset selector can offer (slice of dsh `AgentPreset`). */
+export interface PresetChoice {
+  readonly id: string
+  readonly name?: string | undefined
+  readonly description?: string | undefined
+  readonly broken?: string | undefined
+}
+
+/**
+ * Detail shown when dsh refuses a preset switch because the session already
+ * started (its `agent-preset/locked` failure): the composition is fixed at the
+ * first turn, so the only honest advice is a new session.
+ */
+export const PRESET_LOCKED_DETAIL =
+  'the agent preset is fixed once the session has started; open a new session to change it'
+
+/**
+ * User-facing detail for a failed `agentPresets.select`. The failure crosses
+ * module/realm copies of the protocol error class, so it is identified
+ * structurally — the `isDSHRemoteError` marker plus `code` — rather than with
+ * `instanceof` (the protocol's own `remoteErrorOf` rule).
+ */
+export function presetChangeFailureDetail(error: unknown): string {
+  const fallback = 'agent preset switch failed'
+  if (typeof error !== 'object' || error === null) return fallback
+  const failure = error as { isDSHRemoteError?: unknown; code?: unknown; message?: unknown }
+  if (failure.isDSHRemoteError !== true) return fallback
+  if (failure.code === 'agent-preset/locked') return PRESET_LOCKED_DETAIL
+  return typeof failure.message === 'string' && failure.message.length > 0 ? failure.message : fallback
+}
+
+/**
+ * Options for the preset select, or null when no roster row can be offered.
+ * Broken rows stay out: a composition dsh already refused to compose would
+ * only fail on pick. A current id the roster no longer supplies falls back to
+ * the first offered option (the same stale-route rule the model select
+ * applies), so the select never points at an absent entry. The label leads
+ * with the id — what `DSH_ACP_PRESET` and the session log use — and appends the
+ * preset's own display name in parentheses, so neither has to be looked up by
+ * memory.
+ */
+export function presetSelectOptionList(
+  rows: readonly PresetChoice[],
+  current: string | undefined,
+): { options: { value: string; name: string; description: string | null }[]; currentValue: string } | null {
+  const usable = rows.filter((row) => row.broken === undefined)
+  if (usable.length === 0) return null
+  const options = usable.map((row) => ({
+    value: row.id,
+    name: row.name !== undefined && row.name !== row.id ? `${row.id} (${row.name})` : row.id,
+    description: row.description ?? null,
+  }))
+  const currentValue = current !== undefined && options.some((option) => option.value === current)
+    ? current
+    : options[0]!.value
+  return { options, currentValue }
+}
+
 export interface CatalogModel {
   readonly id: string
   readonly name?: string | undefined

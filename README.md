@@ -102,8 +102,8 @@ Notes:
   GUI-launched Zed cannot find it, start Zed from a terminal that has `dsh`
   on `PATH`, or set `command` to the absolute path of the `dsh` binary.
 - Then start a new thread from the Agent Panel and pick
-  `DeepSeek Harness (acp)`. The thread gear menu offers Model / Thought Level /
-  Write permission selects.
+  `DeepSeek Harness (acp)`. The thread toolbar offers Preset (while the session
+  is still blank), plus the Model / Thought Level / Write permission selects.
 - `DEEPSEEK_API_KEY` is optional in `agent_servers[].env` — without it dsh uses
   the credentials already stored by dsh Web.
 
@@ -174,11 +174,20 @@ the environment **once at boot** (changing them means restarting the agent):
   (`deepseek-official` / `deepseek-v4-flash`); the per-session Model config
   option still overrides.
 
-Presets are not a session option: a preset decides the tool set, and swapping
-it mid-session would break session semantics. Extra presets live in the
-per-user preset root under `$DSH_HOME`; presets such as `code`/`cordis`
-require their host plugins (`code-runtime`, `cordis-host-runner`) installed
-separately.
+Presets are a deployment default **and** a blank-session session option. A new
+thread advertises a **Preset** selector: while the session has produced no
+turn, picking another preset recomposes the agent — tool set, prompt sections,
+skills — the same switch dsh Web performs. dsh fixes the composition at the
+first turn (`agent-preset/locked`), so the bridge drops the selector at
+`turn/start`: after that the preset is a property of the session and only a new
+thread can change it. A reloaded session re-mounts the preset its log last
+selected, not the one `DSH_ACP_PRESET` names now.
+
+Extra presets live in the per-user preset root under `$DSH_HOME`
+(`.agent-presets/<id>/`); presets such as `code`/`cordis` require their host
+plugins (`code-runtime`, `cordis-host-runner`) installed separately. A preset
+whose composition cannot mount is not offered (and a direct pick fails with a
+readable error).
 
 ## Develop
 
@@ -186,7 +195,7 @@ separately.
 pnpm install
 pnpm typecheck   # tsc --noEmit
 pnpm build       # tsdown -> lib/
-pnpm test        # vitest (160 tests incl. spawned frame-purity + history probes)
+pnpm test        # vitest (171 tests incl. spawned frame-purity + history probes)
 node scripts/conformance.mjs     # ACP v1 wire conformance + mount audit
 node scripts/preset-smoke.mjs    # deployment env fields (preset/provider/model)
 node scripts/history-probe.mjs   # session history end-to-end (isolated DSH_HOME)

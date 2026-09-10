@@ -207,7 +207,10 @@ Authenticate 横幅而不是开出空 picker 的会话。
 
 Zed 在 `configOptions` 存在时忽略 `models`/`modes`（`config-options.ts:6-9` 记录的
 quirk），所以全部选择器必须是 config option；v1 SDK 的 `NewSessionResponse` 也没有
-`models` 字段（pi-acp 双广告的做法不适用于 v1）。
+`models` 字段（pi-acp 双广告的做法不适用于 v1）。预设选择器（`preset`）同理走
+config option（自定义 `category: "preset"`，与 `permission` 同款），并且只在会话
+尚未产生 turn 时通告——通告面与实际可行能力一致（`agent-presets` 的 `select` 对
+已开始会话回 `agent-preset/locked`）。
 
 ### 5.2 `default_config_options` 是 Zed 侧显示预置，不发请求
 

@@ -7,11 +7,13 @@
 // frame, broken expectation, or uncovered variant.
 //
 // Covered client→agent methods: initialize, session/new, session/
-// set_config_option (thought_level / model / permission), session/prompt,
-// session/close, session/list, session/load, session/resume, session/delete.
+// set_config_option (thought_level / model / permission / preset),
+// session/prompt, session/close, session/list, session/load, session/resume,
+// session/delete.
 // Covered agent→client calls: session/update (agent_message_chunk,
 // agent_thought_chunk, tool_call, tool_call_update, plan,
-// available_commands_update, usage_update when projections report pressure),
+// available_commands_update, config_option_update,
+// usage_update when projections report pressure),
 // session/request_permission, elicitation/create.
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -28,6 +30,21 @@ const home = mkdtempSync(join(tmpdir(), 'dsh-acp-conformance-'))
 const ws = join(home, 'ws')
 mkdirSync(ws)
 writeFileSync(join(ws, 'hello.txt'), 'hello from ws\n')
+// Authored preset for the preset-select scenario: a persona-only composition
+// (no host-plugin rows), so the blank-session switch is exercised even though
+// the dev composition's module graph cannot resolve the shipped
+// ptc/cordis/minimal host rows (those ship as broken rows and stay off the
+// option list).
+const probePresetDir = join(home, '.agent-presets', 'probe-preset')
+mkdirSync(probePresetDir, { recursive: true })
+writeFileSync(join(probePresetDir, 'agent.cordis.yml'), [
+  '# conformance probe preset: persona only, no host-plugin rows.',
+  '- id: persona',
+  "  name: '@deepseek-ai/dsh-persona'",
+  '  config:',
+  '    prefix: conformance probe preset',
+  '',
+].join('\n'))
 
 const failures = []
 const seenMethods = new Map()
@@ -39,6 +56,7 @@ const EXPECTED_VARIANTS = [
   'tool_call_update',
   'plan',
   'available_commands_update',
+  'config_option_update',
 ]
 const CLIENT_METHOD_VALIDATORS = {
   'session/request_permission': z.zRequestPermissionRequest,
@@ -144,6 +162,36 @@ const client = connect(join(here, 'wire-probe.mjs'), { DSH_HOME: home, WIRE_WS: 
   check(mountProblems.length === 0, 'mount audit vs golden baseline',
     mountProblems.length > 0 ? `\n${mountProblems.map((p) => `  - ${p}`).join('\n')}` : '')
 
+  // ── set_config_option: preset (blank-session composition switch) ──────────
+  // dsh accepts a preset switch only while the session has produced no turn
+  // (`agent-preset/locked` afterwards), so the select is advertised exactly
+  // while it can be honored: exercised here as a round-trip, then again after
+  // the prompt turn (removal + a rejected late pick).
+  step('set_config_option preset')
+  const presetOption = created.configOptions?.find((option) => option.id === 'preset')
+  check(presetOption !== undefined, 'preset select advertised on a blank session',
+    `config option ids: ${JSON.stringify((created.configOptions ?? []).map((option) => option.id))}`)
+  if (presetOption !== undefined) {
+    check(presetOption.currentValue === 'standard', 'preset select current value', String(presetOption.currentValue))
+    check(presetOption.options.some((option) => option.value === 'probe-preset'),
+      'preset select options', `authored preset missing: ${JSON.stringify(presetOption.options.map((option) => option.value))}`)
+    const switched = await call('session/set_config_option', { sessionId, configId: 'preset', value: 'probe-preset' })
+    check(validate(z.zSetSessionConfigOptionResponse, 'set_config_option preset', switched), 'set_config_option schema')
+    check(switched.configOptions?.find((option) => option.id === 'preset')?.currentValue === 'probe-preset',
+      'set_config_option preset', 'preset currentValue did not follow the pick')
+    // Back to the full composition BEFORE the turn: the probe prompt expects
+    // the standard tool set (a blank session may switch as often as it likes).
+    step('set_config_option preset restore')
+    const presetRestored = await call('session/set_config_option', { sessionId, configId: 'preset', value: 'standard' })
+    check(presetRestored.configOptions?.find((option) => option.id === 'preset')?.currentValue === 'standard',
+      'set_config_option preset restore', 'preset currentValue did not return to standard')
+    step('set_config_option preset unknown')
+    const unknownPreset = await client.req('session/set_config_option', { sessionId, configId: 'preset', value: '__nope' })
+    seenMethods.set('session/set_config_option', (seenMethods.get('session/set_config_option') ?? 0) + 1)
+    check(unknownPreset.error !== undefined && /unknown agent preset/.test(JSON.stringify(unknownPreset.error)),
+      'set_config_option preset', `unknown preset accepted: ${JSON.stringify(unknownPreset.result ?? null)}`)
+  }
+
   // ── set_config_option: thought_level / permission ─────────────────────────
   // The bridge advertises thought_level only when the model declares reasoning
   // efforts (a resolved model with none hides the picker — offering levels the
@@ -182,6 +230,21 @@ const client = connect(join(here, 'wire-probe.mjs'), { DSH_HOME: home, WIRE_WS: 
   check(validate(z.zPromptResponse, 'session/prompt', promptReply), 'session/prompt schema')
   check(promptReply.stopReason === 'end_turn', 'session/prompt', `stopReason ${promptReply.stopReason}`)
 
+  // ── preset lock: the first turn fixed the composition ─────────────────────
+  // The selector leaves the client's toolbar with a full-replacement update at
+  // turn/start, and a late pick is refused (dsh's own `agent-preset/locked`).
+  step('preset locked after the first turn')
+  const optionUpdates = client.frames.filter((frame) =>
+    frame.id === undefined && frame.method === 'session/update' && frame.params?.update?.sessionUpdate === 'config_option_update')
+  const presetRemoval = optionUpdates.find((frame) =>
+    !(frame.params.update.configOptions ?? []).some((option) => option.id === 'preset'))
+  check(presetRemoval !== undefined, 'preset select removed at turn/start',
+    `config_option_update frames: ${JSON.stringify(optionUpdates.map((frame) => (frame.params.update.configOptions ?? []).map((option) => option.id)))}`)
+  const latePreset = await client.req('session/set_config_option', { sessionId, configId: 'preset', value: 'probe-preset' })
+  seenMethods.set('session/set_config_option', (seenMethods.get('session/set_config_option') ?? 0) + 1)
+  check(latePreset.error !== undefined && /fixed once the session has started/.test(JSON.stringify(latePreset.error)),
+    'set_config_option preset', `late pick accepted: ${JSON.stringify(latePreset.result ?? null)}`)
+
   // ── session/close / list / load / resume / delete ─────────────────────────
   step('session/close')
   const closed = await call('session/close', { sessionId })
@@ -198,6 +261,10 @@ const client = connect(join(here, 'wire-probe.mjs'), { DSH_HOME: home, WIRE_WS: 
   const resumed = await call('session/resume', { sessionId, cwd: ws, mcpServers: [] })
   check(validate(z.zResumeSessionResponse, 'session/resume', resumed), 'session/resume schema')
   check(Array.isArray(resumed.configOptions), 'session/resume', 'configOptions missing')
+  // A resumed session has already produced a turn: its composition is fixed,
+  // so the preset select must not come back with the reload.
+  check((resumed.configOptions ?? []).every((option) => option.id !== 'preset'),
+    'session/resume', `started session advertised the preset select: ${JSON.stringify((resumed.configOptions ?? []).map((option) => option.id))}`)
 
   step('session/delete')
   const deleted = await call('session/delete', { sessionId })

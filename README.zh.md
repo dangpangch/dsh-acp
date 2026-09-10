@@ -129,7 +129,8 @@ sessionId），随后 exit 0。
   结果一律按 read 风格卡片投递：标题携带模型写下的命令描述（原始命令行留在
   rawInput），捕获的输出以代码围栏随 `tool_call_update` 发出、随卡片折叠。命令
   只在 dsh 自己的沙箱/审批层执行，客户端内从不执行任何东西。
-- 会话选项：Model、Thought Level、Write permission。
+- 会话选项：Preset（仅空白会话：首个 turn 之前可切）、Model、Thought Level、
+  Write permission。
 - 权限：一次性 `session/request_permission`（allow-once / reject-once）。
 - 认证：`authenticate`（`DEEPSEEK_API_KEY` 或 dsh Web 凭据）；缺 key 时
   `AUTH_REQUIRED` 并带 sign-in 方法。
@@ -155,9 +156,16 @@ agent 预设与默认模型路由是**部署字段**，启动时从环境变量�
 - `DSH_ACP_PROVIDER` / `DSH_ACP_MODEL` — 随包默认路由
   （`deepseek-official` / `deepseek-v4-flash`）；会话级 Model 选项仍可覆盖。
 
-预设不是会话选项：预设决定工具集，会话中途换预设会破坏 session 语义。额外预设放
-`$DSH_HOME` 下的用户预设根；`code`/`cordis` 等预设需另行安装宿主插件
-（`code-runtime`、`cordis-host-runner`）。
+预设既是部署默认值，也是**空白会话的会话选项**：新线程会通告一个 **Preset**
+选择器——在会话还没有产生任何 turn 之前，选另一个预设会当场重组 agent（工具集、
+prompt 段、skills），与 dsh Web 的切换同一路径。dsh 在首个 turn 固定组合
+（`agent-preset/locked`），因此桥在 `turn/start` 撤下该选择器：此后预设是会话属性，
+只能靠新线程改变。重载会话按日志里最后一次选择恢复预设，而不是当前的
+`DSH_ACP_PRESET` 值。
+
+额外预设放 `$DSH_HOME` 下的用户预设根（`.agent-presets/<id>/`）；`code`/`cordis`
+等预设需另行安装宿主插件（`code-runtime`、`cordis-host-runner`）。组合无法挂载的
+预设不会出现在选择器里（直接指定取值会得到可读错误）。
 
 ## 开发
 
@@ -165,7 +173,7 @@ agent 预设与默认模型路由是**部署字段**，启动时从环境变量�
 pnpm install
 pnpm typecheck   # tsc --noEmit
 pnpm build       # tsdown -> lib/
-pnpm test        # vitest（160 项，含真实 spawn 的帧纯净与会话历史探针）
+pnpm test        # vitest（171 项，含真实 spawn 的帧纯净与会话历史探针）
 node scripts/conformance.mjs     # ACP v1 wire 一致性 + 挂载审计
 node scripts/preset-smoke.mjs    # 部署字段（preset/provider/model）
 node scripts/history-probe.mjs   # 会话历史端到端（隔离 DSH_HOME）

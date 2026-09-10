@@ -50,9 +50,9 @@ interactive gap left by the official automation-only `@deepseek-ai/dsh-acp`.
 
 ```bash
 pnpm typecheck && pnpm build
-pnpm test            # 157 tests (pure units + spawned probes)
+pnpm test            # 171 tests (pure units + spawned probes)
 node scripts/conformance.mjs   # wire conformance + mount audit matrix
-node scripts/preset-smoke.mjs  # deployment env fields (P1-4)
+node scripts/preset-smoke.mjs  # preset deployment fields + pre-turn selector
 ```
 
 ## Common tasks

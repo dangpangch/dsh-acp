@@ -4,6 +4,24 @@ All notable changes to dsh-acp-v1 (formerly dsh-acp-interactive).
 
 ## [Unreleased] — 0.4.0 (dsh 0.1.2-rc.1 → 0.1.5-rc.1)
 
+### Added (pre-turn preset selector)
+
+- The dsh agent preset is now a session config option, not only a deployment
+  field: a blank session advertises a `preset` select (`category: "preset"`,
+  built from the mounted roster with each row's id first and its display name
+  in parentheses after it), and picking one calls `agentPresets.select(agent,
+  id)` — the parent re-link
+  dsh Web performs — recomposing the session's tool set, prompt sections, and
+  skills on the spot. dsh refuses the switch once the session has produced a
+  turn (`agent-preset/locked`, keyed on the `turnBoundary` projection), so the
+  bridge advertises the selector exactly while it can be honored and removes it
+  with a full-replacement `config_option_update` at the first `turn/start`; a
+  late pick fails with a readable `invalidParams`. Broken roster rows are never
+  offered, and a successful switch re-announces the slash catalog (skills and
+  commands are preset-scoped). `DSH_ACP_PRESET` keeps naming the deployment
+  default. Verified by a new conformance scenario (`config_option_update` is
+  now a covered variant) and by `scripts/preset-smoke.mjs`.
+
 ### Changed (corridor move)
 
 - All `@deepseek-ai/dsh-*` dependencies and devDependencies pinned
@@ -41,6 +59,13 @@ All notable changes to dsh-acp-v1 (formerly dsh-acp-interactive).
 - **Slash-command attachments**: `commands.execute`'s third parameter is the
   tagged `CommandSubmitAttachment` union; the bridge now sends
   `{ type: 'image', … }`.
+- **Preset restore on resume**: `session/load`/`resume` mounted the creation
+  header's `agentPreset`, which a pre-turn switch never updates, so a reloaded
+  session silently reverted to `DSH_ACP_PRESET`. The bridge now folds the last
+  `agent-preset/selected` event from the durable log (dsh reconstructs from its
+  `agentPreset` projection, never the header alone) and derives the preset-lock
+  state from the same log. `src/bridge/events.d.ts` declares the plugin event
+  locally, as it already does for `model/selection` and `session/title`.
 
 ### Changed (mount surface re-baselined)
 
@@ -71,6 +96,13 @@ All notable changes to dsh-acp-v1 (formerly dsh-acp-interactive).
   `sessionDirForDelete` fence units. Spawned probes and the wire conformance
   harness pass on the new cohort; the session-history probe proves
   delete-then-resume still fails (durable removal) on 0.1.5-rc.1.
+- 160 → 171 tests: preset-selector builders and the refused-switch detail
+  (`config-options.test.ts`), the durable preset fold, the turn lock, and
+  `makeRecord` preset seeding (`session-store.test.ts`). The conformance
+  scenario switches preset on a blank session, asserts the removal update and
+  the locked late pick, and asserts a resumed session no longer advertises the
+  selector; `preset-smoke.mjs` adds the env→`currentValue` checks and a
+  switch → close → resume round-trip.
 
 ### Findings (confirmed, not fixed here)
 

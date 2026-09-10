@@ -65,6 +65,8 @@ import { settledStopReason, type DshTurnEndKind } from './codec.js'
 import {
   createInflight,
   drainRecord,
+  hasStartedTurn,
+  lastAgentPreset,
   lastModelSelection,
   lastSessionTitle,
   makeRecord,
@@ -99,11 +101,15 @@ import {
   guardReasoningEffort,
   modelSelectOptionList,
   permissionSelectOptions,
+  presetChangeFailureDetail,
+  PRESET_LOCKED_DETAIL,
+  presetSelectOptionList,
   PROVIDER_DEFAULT_REASONING_EFFORT,
   thoughtLevelCurrentFor,
   thoughtLevelOptionOptions,
   type CatalogProvider,
   type ModelReasoning,
+  type PresetChoice,
 } from './config-options.js'
 
 /** Stable cordis plugin name (design.zh.md §5). */
@@ -128,6 +134,7 @@ const AGENT_VERSION = '0.4.0'
 const CONFIG_ID_MODEL = 'model'
 const CONFIG_ID_THOUGHT_LEVEL = 'thought_level'
 const CONFIG_ID_PERMISSION = 'permission'
+const CONFIG_ID_PRESET = 'preset'
 const AUTH_ENV_KEY = 'DEEPSEEK_API_KEY'
 
 /** Deployment env overrides (P1-4): read at session/agent creation, change = restart. */
@@ -150,8 +157,14 @@ type WireConfigOptions = NonNullable<NewSessionResponse['configOptions']>
 interface AgentPresetsSeam {
   resolve(id?: string): Promise<{ readonly id: string }> | { readonly id: string }
   mount(ctx: unknown, id: string): Promise<unknown>
-  /** Optional roster listing, used only to build readable default errors. */
-  list?(): Promise<Array<{ readonly id: string }>>
+  /** Optional roster listing: the preset select's options and default errors. */
+  list?(): Promise<readonly PresetChoice[]>
+  /**
+   * Re-link one agent to another preset's standing composition. dsh refuses a
+   * session that has already produced a turn (`agent-preset/locked`); optional
+   * so a roster without the switch path never advertises the selector.
+   */
+  select?(agent: Agent, presetId: string): Promise<string>
 }
 
 /** The deployment default preset could not be resolved (P1-4). */
@@ -328,16 +341,25 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     }
   }
 
-  /** Preset ids the configured roots supply, for readable error messages. */
-  const availablePresetIds = async (): Promise<string | undefined> => {
+  /**
+   * Preset roster rows, or undefined when no roster (or no listing) is
+   * mounted. Best effort: a failed read is a warning, never a broken session —
+   * the preset select then simply does not appear.
+   */
+  const rosterRows = async (): Promise<readonly PresetChoice[] | undefined> => {
     if (presets === undefined || presets.list === undefined) return undefined
     try {
-      const rows = await presets.list()
-      return rows.map((row) => row.id).join(', ')
+      return await presets.list()
     } catch (error: unknown) {
       logger.warn(`dsh-acp-v1: preset list unavailable: ${errorChain(error)}`)
       return undefined
     }
+  }
+
+  /** Preset ids the configured roots supply, for readable error messages. */
+  const availablePresetIds = async (): Promise<string | undefined> => {
+    const rows = await rosterRows()
+    return rows?.map((row) => row.id).join(', ')
   }
 
   /** Strict default-preset id for NEW sessions (P1-4): the default is a
@@ -732,6 +754,13 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         break
       case 'turn/start':
         deliverPlanClear(record)
+        // First turn: the composition is now fixed (dsh refuses a preset
+        // switch from here), so the selector leaves the client's toolbar at
+        // the same boundary dsh locks it.
+        if (!record.turnStarted) {
+          record.turnStarted = true
+          dropPresetOption(record)
+        }
         break
       case 'turn/end': {
         if (inflight !== undefined && inflight.turn === event.data.turn) {
@@ -875,84 +904,133 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     }
   }
 
+  /**
+   * Last full option snapshot per live session. The `turn/start` removal of the
+   * preset select re-sends this list minus that one entry instead of rebuilding
+   * the catalog mid-turn, where a failed catalog call would silently drop the
+   * Model select. Weak-keyed: no teardown bookkeeping.
+   */
+  const configOptionsCache = new WeakMap<SessionRecord, WireConfigOptions>()
+
   const refreshConfigOptions = async (record: SessionRecord): Promise<WireConfigOptions> => {
-    const current = record.selection.current
-    if (llm === undefined || current === undefined || current.provider === undefined || current.model === undefined) {
-      return []
-    }
     const out: WireConfigOptions = []
-    try {
-      const providers = await llm.listProviders()
-      const catalog: CatalogProvider[] = []
-      for (const provider of providers) {
-        let models: CatalogProvider['models'] = []
-        try {
-          models = (await llm.listModels(provider.id)) as CatalogProvider['models']
-        } catch (error: unknown) {
-          logger.warn(`dsh-acp-v1: model catalog for ${provider.id} failed: ${String(error)}`)
-        }
-        catalog.push({ id: provider.id, name: provider.name, models })
-      }
-      const flat = modelSelectOptionList(catalog, { provider: current.provider, model: current.model })
-      if (flat !== null && flat.options.length > 0) {
+    // The preset select rides the session's own composition, not the model
+    // route: it is advertised only while dsh would still accept a switch (no
+    // turn yet). A started session's preset is fixed, so the option is dropped
+    // at the first turn/start (dropPresetOption) instead of offering a pick
+    // the harness must refuse with `agent-preset/locked`.
+    if (!record.turnStarted && presets?.list !== undefined && presets.select !== undefined) {
+      const rows = await rosterRows()
+      const preset = rows !== undefined ? presetSelectOptionList(rows, record.agentPreset) : null
+      if (preset !== null) {
         out.push({
           type: 'select',
-          id: CONFIG_ID_MODEL,
-          name: 'Model',
-          description: 'Model used for new requests in this session.',
-          category: 'model',
-          currentValue: flat.currentValue,
-          options: flat.options,
+          id: CONFIG_ID_PRESET,
+          name: 'Preset',
+          description: 'Agent composition for this session (tool set, prompt, skills); fixed once the first turn starts.',
+          category: 'preset',
+          currentValue: preset.currentValue,
+          options: preset.options,
         })
       }
-    } catch (error: unknown) {
-      logger.warn(`dsh-acp-v1: provider catalog failed: ${String(error)}`)
     }
-    const reasoning = await reasoningFor(current.provider, current.model)
-    // Remember exactly which efforts the current model honors so a stale
-    // pick never reaches request assembly (design §6.3 request guard). A
-    // model that resolved but declares no efforts supports NONE of them —
-    // an empty set strips any explicit pick back to provider/default
-    // behavior at prompt time, and the selector below hides (offering
-    // levels the model would refuse is advertising, not support). Only a
-    // failed catalog lookup (reasoning undefined) keeps the pick: unknown,
-    // not unsupported. Refreshed even when the selector hides so a model
-    // switch can never leave a stale supported set behind.
-    record.supportedEfforts = reasoning !== undefined
-      ? new Set((reasoning.efforts ?? []).map((effort) => effort.id))
-      : undefined
-    // A reloaded session can carry a pick the current model no longer offers
-    // (a snapshot from an older build, a catalog change). Heal it durably
-    // BEFORE the select is built, so a reload never resurrects the stale pick
-    // and the currentValue below can only name an offered id.
-    guardCurrentEffort(record)
-    const offered = thoughtLevelOptionOptions(reasoning)
-    if (offered.length > 0) {
-      const currentEffort = thoughtLevelCurrentFor(record.selection.current?.reasoningEffort, reasoning)
-      out.push({
-        type: 'select',
-        id: CONFIG_ID_THOUGHT_LEVEL,
-        name: 'Thought Level',
-        description: 'Reasoning effort for models that support selectable levels.',
-        category: 'thought_level',
-        currentValue: currentEffort,
-        options: offered.map((effort) => ({ value: effort.id, name: effort.name, description: effort.description })),
-      })
+    const current = record.selection.current
+    if (llm !== undefined && current !== undefined && current.provider !== undefined && current.model !== undefined) {
+      try {
+        const providers = await llm.listProviders()
+        const catalog: CatalogProvider[] = []
+        for (const provider of providers) {
+          let models: CatalogProvider['models'] = []
+          try {
+            models = (await llm.listModels(provider.id)) as CatalogProvider['models']
+          } catch (error: unknown) {
+            logger.warn(`dsh-acp-v1: model catalog for ${provider.id} failed: ${String(error)}`)
+          }
+          catalog.push({ id: provider.id, name: provider.name, models })
+        }
+        const flat = modelSelectOptionList(catalog, { provider: current.provider, model: current.model })
+        if (flat !== null && flat.options.length > 0) {
+          out.push({
+            type: 'select',
+            id: CONFIG_ID_MODEL,
+            name: 'Model',
+            description: 'Model used for new requests in this session.',
+            category: 'model',
+            currentValue: flat.currentValue,
+            options: flat.options,
+          })
+        }
+      } catch (error: unknown) {
+        logger.warn(`dsh-acp-v1: provider catalog failed: ${String(error)}`)
+      }
+      const reasoning = await reasoningFor(current.provider, current.model)
+      // Remember exactly which efforts the current model honors so a stale
+      // pick never reaches request assembly (design §6.3 request guard). A
+      // model that resolved but declares no efforts supports NONE of them —
+      // an empty set strips any explicit pick back to provider/default
+      // behavior at prompt time, and the selector below hides (offering
+      // levels the model would refuse is advertising, not support). Only a
+      // failed catalog lookup (reasoning undefined) keeps the pick: unknown,
+      // not unsupported. Refreshed even when the selector hides so a model
+      // switch can never leave a stale supported set behind.
+      record.supportedEfforts = reasoning !== undefined
+        ? new Set((reasoning.efforts ?? []).map((effort) => effort.id))
+        : undefined
+      // A reloaded session can carry a pick the current model no longer offers
+      // (a snapshot from an older build, a catalog change). Heal it durably
+      // BEFORE the select is built, so a reload never resurrects the stale pick
+      // and the currentValue below can only name an offered id.
+      guardCurrentEffort(record)
+      const offered = thoughtLevelOptionOptions(reasoning)
+      if (offered.length > 0) {
+        const currentEffort = thoughtLevelCurrentFor(record.selection.current?.reasoningEffort, reasoning)
+        out.push({
+          type: 'select',
+          id: CONFIG_ID_THOUGHT_LEVEL,
+          name: 'Thought Level',
+          description: 'Reasoning effort for models that support selectable levels.',
+          category: 'thought_level',
+          currentValue: currentEffort,
+          options: offered.map((effort) => ({ value: effort.id, name: effort.name, description: effort.description })),
+        })
+      }
+      if (permissionPresets !== undefined) {
+        const names = PERMISSION_PRESETS as readonly string[]
+        const currentValue = record.permission ?? 'workspace-write'
+        out.push({
+          type: 'select',
+          id: CONFIG_ID_PERMISSION,
+          name: 'Write permission',
+          description: 'One-shot permission preset for this session (sandbox mode + approval policy).',
+          category: 'permission',
+          currentValue: names.includes(currentValue) ? currentValue : names[1]!,
+          options: permissionSelectOptions(names),
+        })
+      }
     }
-    if (permissionPresets !== undefined) {
-      const names = PERMISSION_PRESETS as readonly string[]
-      const currentValue = record.permission ?? 'workspace-write'
-      out.push({
-        type: 'select',
-        id: CONFIG_ID_PERMISSION,
-        name: 'Write permission',
-        description: 'One-shot permission preset for this session (sandbox mode + approval policy).',
-        category: 'permission',
-        currentValue: names.includes(currentValue) ? currentValue : names[1]!,
-        options: permissionSelectOptions(names),
-      })
-    }
+    configOptionsCache.set(record, out)
     return out
+  }
+
+  /**
+   * Stop advertising the preset select once the session has started: dsh fixes
+   * the composition there (`agent-preset/locked`), so the selector's absence is
+   * the truthful surface. Full replacement from the cached snapshot — no
+   * catalog I/O during a turn, and the other selectors cannot be disturbed.
+   */
+  const dropPresetOption = (record: SessionRecord): void => {
+    if (presets?.list === undefined || presets.select === undefined) return
+    const cached = configOptionsCache.get(record)
+    if (cached === undefined || !cached.some((option) => option.id === CONFIG_ID_PRESET)) return
+    const next = cached.filter((option) => option.id !== CONFIG_ID_PRESET)
+    serialize(record, async () => {
+      if (record.closed || record.replaying) return
+      try {
+        await notify({ sessionId: record.id, update: configOptionsUpdate(next) })
+      } catch (error: unknown) {
+        logger.warn(`dsh-acp-v1: preset selector removal failed: ${errorChain(error)}`)
+      }
+    })
   }
 
   /**
@@ -969,11 +1047,32 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
 
   /** Apply one validated config change; takes effect on the next turn. */
   const applyConfigOption = async (record: SessionRecord, configId: string, value: unknown): Promise<void> => {
+    if (typeof value !== 'string') throw invalidParams(`config option "${configId}" expects a select value id`)
+    // Preset first: it is independent of the model route and is the one option
+    // that closes a window — dsh accepts the switch only while the session has
+    // produced no turn (`agent-preset/locked` otherwise).
+    if (configId === CONFIG_ID_PRESET) {
+      if (presets?.select === undefined) throw invalidParams('agent presets are not mounted')
+      if (record.turnStarted) throw invalidParams(PRESET_LOCKED_DETAIL)
+      const rows = await rosterRows()
+      const offered = rows !== undefined ? presetSelectOptionList(rows, record.agentPreset) : null
+      if (offered === null || !offered.options.some((option) => option.value === value)) {
+        throw invalidParams(`unknown agent preset: ${value}`)
+      }
+      try {
+        record.agentPreset = await presets.select(record.agent, value)
+      } catch (error: unknown) {
+        throw invalidParams(presetChangeFailureDetail(error))
+      }
+      // The preset owns the skill/command surface: a switch changes what the
+      // client's slash popup should offer.
+      announceSlashCatalog(record)
+      return
+    }
     const current = record.selection.current
     if (current === undefined || current.provider === undefined || current.model === undefined) {
       throw invalidParams('config options are unavailable: the session has no model route')
     }
-    if (typeof value !== 'string') throw invalidParams(`config option "${configId}" expects a select value id`)
     if (configId === CONFIG_ID_MODEL) {
       const slash = value.indexOf('/')
       if (slash <= 0 || slash === value.length - 1) throw invalidParams(`unknown model value: ${value}`)
@@ -1166,11 +1265,19 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     }
   }
 
-  /** One ordered "create-or-resume" agent handle for history loads. */
+  /**
+   * One ordered "create-or-resume" agent handle for history loads. Returns the
+   * preset actually mounted (undefined without a roster) so the record can
+   * answer the preset select before the first refresh.
+   */
   const resumeAgentFor = async (
     sessionId: SessionId,
     agentPreset: string | undefined,
-  ): Promise<{ handle: Awaited<ReturnType<typeof agents.create>>; selection: ModelSelectionRef }> => {
+  ): Promise<{
+    handle: Awaited<ReturnType<typeof agents.create>>
+    selection: ModelSelectionRef
+    presetId: string | undefined
+  }> => {
     const { selection, agentOptions } = routeDefaults()
     const presetId = agentPreset ?? await defaultPresetId()
     const handle = await agents.resume({
@@ -1183,7 +1290,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         }
       },
     })
-    return { handle, selection }
+    return { handle, selection, presetId }
   }
 
   /**
@@ -1306,7 +1413,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         await handle.dispose().catch(() => {})
         throw internalError('connection closed during session/new')
       }
-      const record = makeRecord(sessionId, params.cwd, handle, selection)
+      const record = makeRecord(sessionId, params.cwd, handle, selection, { agentPreset: presetId })
       const configOptions = await registerRecord(record)
       await snapshotMounts(record)
       return { sessionId, configOptions }
@@ -1344,18 +1451,27 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
         throw invalidParams(`session ${params.sessionId} belongs to ${header.cwd}, not ${params.cwd}`)
       }
       await releaseOnline(sessionId)
-      const { handle, selection } = await resumeAgentFor(sessionId, header.agentPreset)
+      // The durable log decides BOTH the composition to resume and whether the
+      // preset is still switchable: dsh reconstructs the preset from the
+      // `agentPreset` projection (creation header first, then selection
+      // events), so a pre-turn switch must be replayed here — the header alone
+      // keeps naming the ORIGINAL default.
+      const snapshot = query !== undefined ? await query.readSession(sessionId) : undefined
+      const presetId = lastAgentPreset(snapshot?.events ?? []) ?? header.agentPreset
+      const { handle, selection, presetId: mountedPreset } = await resumeAgentFor(sessionId, presetId)
       if (closed) {
         await handle.dispose().catch(() => {})
         throw internalError('connection closed during session load/resume')
       }
-      const record = makeRecord(sessionId, params.cwd, handle, selection)
+      const record = makeRecord(sessionId, params.cwd, handle, selection, {
+        agentPreset: mountedPreset,
+        turnStarted: hasStartedTurn(snapshot?.events ?? []),
+      })
       // Restore the session's durable model selection (route + picked effort)
       // BEFORE config options are built: a reloaded session must advertise the
       // thought levels of the route it actually used, not silently revert to
       // the configured default (the pi-acp pattern — the session is the source
       // of truth). Sessions predating the snapshot keep their defaults.
-      const snapshot = query !== undefined ? await query.readSession(sessionId) : undefined
       const restored = snapshot !== undefined ? lastModelSelection(snapshot.events) : undefined
       if (restored !== undefined) selection.current = restored
       const configOptions = await registerRecord(record, params.replay && snapshot !== undefined

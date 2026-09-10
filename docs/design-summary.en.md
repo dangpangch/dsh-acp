@@ -32,7 +32,7 @@ and elicitation forms.
 | `session/load` | resume + history replay | committed facts replayed as notifications |
 | `session/resume` | resume, no replay | continues the thread |
 | close/delete/cancel | quiescent teardown / delete | never touches sibling sessions |
-| config options | model + thought-level + write-permission selects | hot-refreshed; per-session state restored on load/resume |
+| config options | preset + model + thought-level + write-permission selects | the preset select exists only while the session is still blank (dsh's `agent-preset/locked`); the rest are hot-refreshed; per-session state restored on load/resume |
 | `request_permission` | approval bridge | allow-once / allow-always / reject-once |
 | elicitation | `ask_user_question` ↔ ACP form | capability-gated; five coded exits never hang the round |
 
@@ -44,8 +44,11 @@ registries and infrastructure. Sessions are composed from one preset —
 deployment default `standard`, overridable with `DSH_ACP_PRESET`. The
 conformance harness diffs each session's actual mounted surface against the
 golden baseline (`scripts/standard-mounts.json`), so host-plane leakage into
-an ACP session fails the run. Presets are not a session option: the preset
-decides the tool set and swapping mid-session would break session semantics.
+an ACP session fails the run. A preset is the deployment default *and* a
+blank-session session option: dsh accepts `agentPresets.select` only while the
+session has produced no turn, so the bridge advertises the selector exactly
+then, drops it at the first `turn/start`, and restores the last selected preset
+(not the creation header) on load/resume.
 
 ## Capability discipline
 

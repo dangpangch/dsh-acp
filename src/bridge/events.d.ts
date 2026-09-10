@@ -17,6 +17,12 @@
 // bridge's program still needs a local declaration to narrow `event.data` and
 // stream a title written by the title service as a `session_info_update`.
 //
+// `agent-preset/selected` is typed by @deepseek-ai/dsh-agent-presets (a
+// devDependency of this bundle: only the standalone dev/test boot names the
+// row), so the bridge's program needs the same local declaration to fold the
+// last pre-turn preset pick when a session is reloaded. The payload mirrors
+// that package's `session` module exactly.
+//
 // The (unused) type import makes this file a module: a global-script
 // `declare module` would become an ambient declaration that shadows the real
 // `@deepseek-ai/dsh-session/types` resolution and drops the other packages'
@@ -41,6 +47,16 @@ declare module '@deepseek-ai/dsh-session/types' {
             title: string
             messageSeqs: readonly number[]
             source: { kind: string } & Record<string, unknown>
+        }
+        /**
+         * A preset chosen after creation, while the session was still blank.
+         * Log-only: the creation header keeps naming the ORIGINAL preset, so a
+         * resumed session rebuilds the composition later turns actually ran
+         * under only by folding this event (dsh reads its `agentPreset`
+         * projection, never the header alone).
+         */
+        'agent-preset/selected': {
+            agentPreset: string
         }
     }
 }

@@ -84,6 +84,19 @@ export interface SessionRecord {
   supportedEfforts: ReadonlySet<string> | undefined
   /** Effective write-permission preset name (config option + /permission). */
   permission: string | undefined
+  /**
+   * Agent preset this session is composed from: the deployment default at
+   * creation, the last `agent-preset/selected` pick after a pre-turn switch.
+   * The preset select's current value (undefined = no roster).
+   */
+  agentPreset: string | undefined
+  /**
+   * A turn has begun. dsh refuses a preset switch from here on
+   * (`agent-preset/locked`: the composition decides the tool set, so a started
+   * session's preset is fixed) — the bridge stops advertising the selector at
+   * the same boundary.
+   */
+  turnStarted: boolean
   /** Whole-table plan fold most recently delivered on the wire. */
   sentPlanFold: string | undefined
   /** Whether a plan was ever sent (turn/start clearing only after one). */
@@ -155,6 +168,7 @@ export function makeRecord(
   cwd: string,
   handle: AgentHandle,
   selection: ModelSelectionRef,
+  init: { agentPreset?: string | undefined; turnStarted?: boolean | undefined } = {},
 ): SessionRecord {
   return {
     id,
@@ -167,6 +181,8 @@ export function makeRecord(
     closed: false,
     supportedEfforts: undefined,
     permission: undefined,
+    agentPreset: init.agentPreset,
+    turnStarted: init.turnStarted ?? false,
     sentPlanFold: undefined,
     everSentPlan: false,
     replaying: false,
@@ -208,6 +224,34 @@ export function lastModelSelection(events: readonly SessionEvent[]): ModelSelect
     return { ...event.data }
   }
   return undefined
+}
+
+/**
+ * The LAST `agent-preset/selected` snapshot in the durable log (later writes
+ * win), so a reloaded session is composed from the preset its history actually
+ * ran under. dsh's own reconstruction reads the `agentPreset` session
+ * projection, never the creation header alone: a pre-turn switch leaves the
+ * header naming the ORIGINAL default. Sessions predating the event return
+ * undefined and the caller keeps the stored header value.
+ */
+export function lastAgentPreset(events: readonly SessionEvent[]): string | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]!
+    if (event.type !== 'agent-preset/selected') continue
+    return event.data.agentPreset
+  }
+  return undefined
+}
+
+/**
+ * Whether a session has already produced a turn, i.e. dsh will refuse a preset
+ * switch (`agent-preset/locked`). dsh's lock reads the `turnBoundary`
+ * projection — `lastTurn > 0 || openTurnStartSeq !== null` — which `turn/start`
+ * sets and `turn/end` only half-clears, so "a `turn/start` exists" is exactly
+ * that condition.
+ */
+export function hasStartedTurn(events: readonly SessionEvent[]): boolean {
+  return events.some((event) => event.type === 'turn/start')
 }
 
 /**
