@@ -6,7 +6,6 @@
 // folds to one final plan, raw deltas never leak.
 import { describe, expect, it } from 'vitest'
 import { SessionSeq, type SessionEvent, type SessionEventMap } from '@deepseek-ai/dsh-session'
-import { foldTodoPlan, planUpdate } from '../src/bridge/updates.js'
 import { replayUpdatesForEvent } from '../src/bridge/replay.js'
 import { rawInputOf } from '../src/bridge/tool-cards.js'
 

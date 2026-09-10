@@ -3,6 +3,8 @@
 调查 dsh-acp-v1 中与"模型"和"模型选项"（configOptions）有关的全部配置面、
 数据流与边界状态。所有结论都经过源码核对或无头复现验证（2026-09-06，sdk 1.4.0 /
 dsh 0.1.2-rc.1 基线）。行号以当前工作区为准，后续提交可能漂移。
+（走廊已于 2026-09-10 迁至 dsh 0.1.5-rc.1：模型/选项语义未变，仅行号与目录项
+增加；迁移记录见 `docs/compat-audit-0.1.5-rc.1.zh.md`。）
 
 配套文档：整体映射见 `docs/design.zh.md`（§3.5 configOptions、§3.6 能力纪律）；
 本报告只深挖模型/选项这一条线。
@@ -153,7 +155,7 @@ dsh-base 注册 `agent-default-model` 行（`dsh-base/cordis.patch.yml:74-79`）
 
 - `provider-default` 是**仅展示**的 id（`PROVIDER_DEFAULT_REASONING_EFFORT`，
   `config-options.ts:12`）：选中它 = 剥离显式 effort，回到提供方默认。
-- current 永不默认到 `off`（`currentEffortFor`，design §6.3）。
+- current 永不默认到 `off`（`thoughtLevelCurrentFor`，design §6.3）。
 - 请求前守卫 `guardReasoningEffort`（`config-options.ts:100-107`）：空集剥一切、未知集
   保留——双保险，防止旧选择流进请求组装。
 - **失效选择自愈**（2026-09-06 补）：守卫剥离改为经 `setSelection` 持久化——旧构建或
@@ -179,7 +181,7 @@ Authenticate 横幅而不是开出空 picker 的会话。
   - 每次调用返回**全量**刷新后的 configOptions。
 - **生效时机**：切换只改 `ModelSelectionRef` 并追加 `model/selection` 事件到会话日志；
   "下一次 turn/step"生效（prompt 组装在委派前快照选择）。
-- **持久化/恢复**：`model/selection` 是桥独写的日志事件（`selection-event.d.ts`，
+- **持久化/恢复**：`model/selection` 是桥独写的日志事件（`events.d.ts`，
   在 harness 运行时持久化白名单内）；`session/load|resume` 在构建 configOptions **前**
   取 `lastModelSelection(events)` 恢复路由+档位（`session-store.ts:171`，commit
   414c880e，pi-acp 的"会话是唯一事实源"模式）。旧会话无快照 → 保持桥默认。

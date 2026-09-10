@@ -30,9 +30,9 @@ const check = (ok, label, detail = '') => {
 const newestSessionHeader = (home) => {
   const sessionsRoot = join(home, 'sessions')
   if (!existsSync(sessionsRoot)) return undefined
-  const walk = (dir) => readdirSync(dir, { withFileTypes: true })
-    .flatMap((entry) => entry.isDirectory() ? walk(join(dir, entry.name)) : [join(dir, entry.name)])
-  const files = walk(sessionsRoot).filter((path) => path.endsWith('.jsonl.zstd'))
+  const files = readdirSync(sessionsRoot, { recursive: true })
+    .map((path) => join(sessionsRoot, path))
+    .filter((path) => path.endsWith('.jsonl.zstd'))
   if (files.length === 0) return undefined
   const withTime = files.map((path) => ({
     header: JSON.parse(zstdDecompressSync(readFileSync(path)).toString('utf8').split('\n')[0]),
@@ -83,7 +83,7 @@ const run = async () => {
       '- id: persona',
       "  name: '@deepseek-ai/dsh-persona'",
       '  config:',
-      '    text: smoke preset',
+      '    prefix: smoke preset',
       '',
     ].join('\n'))
     const smoke = await handshake(home, { ...base, DSH_ACP_PRESET: 'smoke' }, false)

@@ -4,11 +4,8 @@ import { describe, expect, it } from 'vitest'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import {
   AcpContentError,
-  CANONICAL_BASE64,
   contentForPrompt,
   isImageMediaType,
-  resourceLinkText,
-  resourceText,
   scanPrompt,
 } from '../src/bridge/content.js'
 
@@ -33,13 +30,14 @@ describe('media-type helpers', () => {
   })
 
   it('accepts only canonical base64 (no whitespace or URL-safe aliases)', () => {
-    expect(CANONICAL_BASE64.test('iVBORw0KGgo=')).toBe(true)
-    expect(CANONICAL_BASE64.test('iVBORw0KGgo')).toBe(false) // wrong padding
-    expect(CANONICAL_BASE64.test('iVBORw0KGgo===')).toBe(false) // extra padding
-    expect(CANONICAL_BASE64.test('aGVsbG8=')).toBe(true)
-    expect(CANONICAL_BASE64.test('aGVsbG8')).toBe(false) // canonical form requires padding
-    expect(CANONICAL_BASE64.test('aGVsbG8=\n')).toBe(false) // whitespace
-    expect(CANONICAL_BASE64.test('aGVsbG8-')).toBe(false) // url-safe alias
+    const admission = (data: string) => scanPrompt([{ ...PNG_BLOCK, data }], true)
+    expect(admission('iVBORw0KGgo=')).toHaveLength(1)
+    expect(() => admission('iVBORw0KGgo')).toThrowError(/canonical base64/) // wrong padding
+    expect(() => admission('iVBORw0KGgo===')).toThrowError(/canonical base64/) // extra padding
+    expect(admission('aGVsbG8=')).toHaveLength(1)
+    expect(() => admission('aGVsbG8')).toThrowError(/canonical base64/) // canonical form requires padding
+    expect(() => admission('aGVsbG8=\n')).toThrowError(/canonical base64/) // whitespace
+    expect(() => admission('aGVsbG8-')).toThrowError(/canonical base64/) // url-safe alias
   })
 })
 
@@ -85,7 +83,7 @@ describe('contentForPrompt (ordered reconstruction)', () => {
   it('renders resource links as bracketed text in order', () => {
     const link = { type: 'resource_link' as const, name: 'note', uri: 'file:///n.md' }
     const content = contentForPrompt([{ type: 'text', text: 'see ' }, link], [])
-    expect(content[0]).toEqual({ type: 'text', text: `see ${resourceLinkText(link)}` })
+    expect(content[0]).toEqual({ type: 'text', text: 'see \n[resource_link name="note" uri="file:///n.md"]\n' })
   })
 
   it('places image blocks at their wire position with the matching durable ref', () => {
@@ -110,11 +108,13 @@ describe('contentForPrompt (ordered reconstruction)', () => {
 
   it('marks blob and unknown resources instead of dumping decoded bytes', () => {
     const blob = { type: 'resource' as const, resource: { uri: 'file:///bin.dat', mimeType: 'application/octet-stream', blob: Buffer.from('hi').toString('base64') } }
-    expect(resourceText(blob)).toBe('\n[embedded context file:///bin.dat (application/octet-stream, 2 bytes, not decoded)]\n')
+    expect(contentForPrompt([blob], [])).toEqual([
+      { type: 'text', text: '\n[embedded context file:///bin.dat (application/octet-stream, 2 bytes, not decoded)]\n' },
+    ])
     // An embedded resource with neither text nor blob keeps its marker (the
     // runtime narrowing tolerates a hand-shaped payload).
-    const empty = { type: 'resource', resource: { uri: 'file:///x' } } as unknown as Parameters<typeof resourceText>[0]
-    expect(resourceText(empty)).toBe('\n[embedded context file:///x]\n')
+    const empty = { type: 'resource', resource: { uri: 'file:///x' } } as unknown as Parameters<typeof contentForPrompt>[0][number]
+    expect(contentForPrompt([empty], [])).toEqual([{ type: 'text', text: '\n[embedded context file:///x]\n' }])
   })
 
   it('keeps a resource-only prompt non-empty (degraded text still counts)', () => {

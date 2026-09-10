@@ -65,7 +65,7 @@ function isCommandTool(name: string): boolean {
  * path already shows in the title and the follow-along location) — keep only
  * the `<content>` body. Any other shape passes through unchanged.
  */
-export function resultCardText(name: string, text: string): string {
+function resultCardText(name: string, text: string): string {
   if (name !== 'read') return text
   const match = /<content>\n?([\s\S]*?)\n?<\/content>/.exec(text)
   return match === null ? text : match[1]!
@@ -140,15 +140,11 @@ function toolPathOf(rawInput: unknown): string | undefined {
  * 1-based line of the first occurrence of `needle` in `text`, or undefined
  * when absent or ambiguous (pi-acp's rule: a repeated match carries no focus).
  */
-export function uniqueLineOfText(text: string, needle: string): number | undefined {
+function uniqueLineOfText(text: string, needle: string): number | undefined {
   if (needle.length === 0) return undefined
   const first = text.indexOf(needle)
   if (first < 0 || text.indexOf(needle, first + needle.length) >= 0) return undefined
-  let line = 1
-  for (let index = 0; index < first; index += 1) {
-    if (text.charCodeAt(index) === 10) line += 1
-  }
-  return line
+  return text.slice(0, first).split('\n').length
 }
 
 /** First 1-based line of a str_replace_editor `view_range` window ([11,12]→11). */
@@ -230,7 +226,7 @@ function isFileDiffLike(value: unknown): value is FileDiffLike {
 }
 
 /** Narrow opaque `tool/result` meta to validated file diffs ([] is valid). */
-export function fileDiffsFromMeta(meta: unknown): FileDiffLike[] | undefined {
+function fileDiffsFromMeta(meta: unknown): FileDiffLike[] | undefined {
   if (typeof meta !== 'object' || meta === null || Array.isArray(meta)) return undefined
   const diffs = (meta as Record<string, unknown>)['diffs']
   if (!Array.isArray(diffs) || !diffs.every(isFileDiffLike)) return undefined
@@ -280,7 +276,7 @@ export function diffForToolCall(
  * absolute path outside the workspace, or a generated regex from blowing up
  * the card header; ordinary arguments pass through untouched.
  */
-export const TOOL_CARD_TITLE_MAX = 400
+const TOOL_CARD_TITLE_MAX = 400
 
 /** The model-written command line of a bash/pwsh call, or undefined. */
 function commandOf(rawInput: unknown): string | undefined {

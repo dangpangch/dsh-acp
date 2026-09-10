@@ -44,7 +44,7 @@ export interface SlashCatalogEntry {
 }
 
 /** Slash-name prefix under which user-invocable skills are announced. */
-export const SKILL_SLASH_PREFIX = 'skill:'
+const SKILL_SLASH_PREFIX = 'skill:'
 
 /**
  * Normalize one text block's skill tokens back to bare gestures. Zed sends the

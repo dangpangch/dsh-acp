@@ -2,11 +2,8 @@
 // config options; §6.2 offline tests). Pure catalog math, no harness needed.
 import { describe, expect, it } from 'vitest'
 import {
-  currentEffortFor,
-  effortOptionsFor,
   guardReasoningEffort,
   modelSelectOptionList,
-  permissionLabel,
   permissionSelectOptions,
   PROVIDER_DEFAULT_REASONING_EFFORT,
   thoughtLevelCurrentFor,
@@ -48,21 +45,19 @@ describe('modelSelectOptionList (flat provider/model pairs)', () => {
 })
 
 describe('effort pickers (thinking-modes semantics)', () => {
-  it('uses the model-declared efforts verbatim when present', () => {
-    expect(effortOptionsFor(REASONING).map((e) => e.id)).toEqual(['off', 'medium'])
+  it('offers the model-declared efforts, with provider-default first when none is declared', () => {
+    expect(thoughtLevelOptionOptions(REASONING).map((e) => e.id)).toEqual([PROVIDER_DEFAULT_REASONING_EFFORT, 'off', 'medium'])
+    expect(thoughtLevelOptionOptions({ ...REASONING, defaultEffort: 'medium' }).map((e) => e.id)).toEqual(['off', 'medium'])
   })
 
   it('offers nothing for a resolved model that declares no efforts (picker hides)', () => {
-    expect(effortOptionsFor({ efforts: [] })).toEqual([])
     expect(thoughtLevelOptionOptions({ efforts: [] })).toEqual([])
   })
 
   it('falls back to the canonical level table only when support is unknown (lookup failed)', () => {
-    const fallback = effortOptionsFor(undefined)
-    expect(fallback.map((e) => e.id)).toContain('off')
-    expect(fallback.map((e) => e.id)).toContain('max')
     const offered = thoughtLevelOptionOptions(undefined)
     expect(offered[0]!.id).toBe(PROVIDER_DEFAULT_REASONING_EFFORT)
+    expect(offered.map((e) => e.id)).toContain('off')
     expect(offered.map((e) => e.id)).toContain('max')
   })
 
@@ -75,9 +70,9 @@ describe('effort pickers (thinking-modes semantics)', () => {
   })
 
   it('never lets the current value fall back to off: unknown state renders provider-default', () => {
-    expect(currentEffortFor(undefined, undefined)).toBe(PROVIDER_DEFAULT_REASONING_EFFORT)
-    expect(currentEffortFor(undefined, 'medium')).toBe('medium')
-    expect(currentEffortFor('off', undefined)).toBe('off') // an explicit user pick is honored
+    expect(thoughtLevelCurrentFor(undefined, undefined)).toBe(PROVIDER_DEFAULT_REASONING_EFFORT)
+    expect(thoughtLevelCurrentFor(undefined, { ...REASONING, defaultEffort: 'medium' })).toBe('medium')
+    expect(thoughtLevelCurrentFor('off', REASONING)).toBe('off') // an explicit user pick is honored
   })
 })
 
@@ -124,9 +119,11 @@ describe('guardReasoningEffort (request-time strip)', () => {
 
 describe('permission presets', () => {
   it('labels the three shipped presets', () => {
-    expect(permissionLabel('read-only')).toBe('Read only')
-    expect(permissionLabel('workspace-write')).toBe('Workspace write')
-    expect(permissionLabel('danger-full-access')).toBe('Full access')
+    expect(permissionSelectOptions(['read-only', 'workspace-write', 'danger-full-access']).map((o) => o.name)).toEqual([
+      'Read only',
+      'Workspace write',
+      'Full access',
+    ])
   })
 
   it('builds select options from preset names', () => {

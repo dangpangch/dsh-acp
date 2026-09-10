@@ -9,14 +9,20 @@
 # config; `- insert:` adds new rows. Mapping rationale: docs/design.zh.md.
 
 # ── persona: ACP sessions get their own concise coding persona ─────────────
+# dsh 0.1.5-rc.1 split the deployment persona into a prefix (before first-party
+# guidance) and a suffix (after it); the former single `persona` key is gone
+# from the system-prompt schema, so the identity sentence and the environment
+# notes must ride the two new keys — the same shape @deepseek-ai/dsh-acp-app
+# ships in this cohort.
 - id: system-prompt
   config:
-    persona: >-
-      You are a coding assistant powered by the {{model}} model. Your working
-      directory is {{cwd}}. Your bash tool runs under a file sandbox — a
-      `[sandbox: file access denied …]` result is policy, not a command bug.
-      Verify your work by running the code or tests. Keep answers brief and
-      factual.
+    personaPrefix: >-
+      You are a coding assistant powered by the {{model}} model.
+    personaSuffix: >-
+      Your working directory is {{cwd}}. Your bash tool runs under a file
+      sandbox — a `[sandbox: file access denied …]` result is policy, not a
+      command bug. Verify your work by running the code or tests. Keep answers
+      brief and factual.
 
 # No HMR under an ACP stdio session: a reload would tear the wire down.
 - id: hmr

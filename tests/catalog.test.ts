@@ -7,7 +7,7 @@
 // bare `/name` gesture on the prompt path. Result is partitioned commands
 // first then skills, each block in registry order.
 import { describe, expect, it } from 'vitest'
-import { SKILL_SLASH_PREFIX, mergeSlashCatalog, normalizeSkillSlashText } from '../src/bridge/catalog.js'
+import { mergeSlashCatalog, normalizeSkillSlashText } from '../src/bridge/catalog.js'
 import type { SlashCommandEntry, SlashSkillEntry } from '../src/bridge/catalog.js'
 
 const command = (name: string, hint?: string): SlashCommandEntry => ({
@@ -73,10 +73,6 @@ describe('mergeSlashCatalog', () => {
   it('empty catalogs produce an empty announcement list', () => {
     expect(mergeSlashCatalog([], [])).toEqual([])
     expect(mergeSlashCatalog([], [skill('hidden', false)])).toEqual([])
-  })
-
-  it('exposes the skill slash prefix used by both announce and prompt normalization', () => {
-    expect(SKILL_SLASH_PREFIX).toBe('skill:')
   })
 })
 

@@ -24,7 +24,7 @@ const check = (ok, label, detail = '') => {
 }
 
 if (from === undefined || to === undefined) {
-  console.error('usage: pnpm audit:corridor <from-dsh-version> <to-dsh-version>   (e.g. 0.1.2-rc.1 0.1.3)')
+  console.error('usage: pnpm audit:corridor <from-dsh-version> <to-dsh-version>   (e.g. 0.1.2-rc.1 0.1.5-rc.1)')
   process.exit(2)
 }
 

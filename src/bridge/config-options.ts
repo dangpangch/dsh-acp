@@ -41,64 +41,41 @@ export interface ModelReasoning {
 }
 
 /**
- * The thinking levels to offer for one model, mirroring the three reasoning
- * states the bridge can observe (model-config.zh.md §3.4): a resolved model
- * offers exactly its declared efforts — an empty list means it honors NO
- * explicit effort, and the caller must hide the picker — while a failed
- * lookup (reasoning undefined, support genuinely unknown) falls back to the
- * canonical table. When the model names no default effort the display-only
- * `provider-default` entry is prepended so the picker never has to default
- * to the first declared level (`off` for the canonical list) — which would
- * misrepresent "provider default" as "thinking off". The default NEVER
- * falls back to `off`.
- */
-export function effortOptionsFor(
-  reasoning: ModelReasoning | undefined,
-): readonly EffortLevel[] {
-  if (reasoning !== undefined) return reasoning.efforts
-  return CANONICAL_REASONING_LEVELS
-}
-
-/**
- * The picker's current effort id: an explicit session pick wins, else the
- * model's declared default effort, else the display-only `provider-default`
- * entry. Never falls back to `off` (design §6.3).
- */
-export function currentEffortFor(
-  current: string | undefined,
-  defaultEffort: string | undefined,
-): string {
-  return current ?? defaultEffort ?? PROVIDER_DEFAULT_REASONING_EFFORT
-}
-
-/**
  * The thought_level select's current value, validated against the options the
- * picker actually offers: a pick the current model no longer supports (a
- * restored session snapshot from before a model or catalog change) falls back
- * to the model's declared default effort, else the display-only
- * `provider-default` — the select never points at an absent entry (the same
- * stale-route rule the model select applies). Under a failed lookup the
- * canonical options contain every canonical pick, so an unknown-support pick
- * is kept (unknown, not unsupported).
+ * picker actually offers: an explicit session pick wins, else the model's
+ * declared default effort, else the display-only `provider-default` — never
+ * `off` (design §6.3). A pick the current model no longer supports (a restored
+ * session snapshot from before a model or catalog change) falls back the same
+ * way, so the select never points at an absent entry (the same stale-route
+ * rule the model select applies). Under a failed lookup the canonical options
+ * contain every canonical pick, so an unknown-support pick is kept (unknown,
+ * not unsupported).
  */
 export function thoughtLevelCurrentFor(
   current: string | undefined,
   reasoning: ModelReasoning | undefined,
 ): string {
-  const pick = currentEffortFor(current, reasoning?.defaultEffort)
+  const pick = current ?? reasoning?.defaultEffort ?? PROVIDER_DEFAULT_REASONING_EFFORT
   if (thoughtLevelOptionOptions(reasoning).some((effort) => effort.id === pick)) return pick
   return reasoning?.defaultEffort ?? PROVIDER_DEFAULT_REASONING_EFFORT
 }
 
 /**
  * Options for a thought_level select (display-only provider-default first).
- * Empty for a resolved model that declares no efforts: the caller hides the
- * select entirely instead of offering levels the request guard would strip.
+ * Mirroring the three reasoning states the bridge can observe
+ * (model-config.zh.md §3.4): a resolved model offers exactly its declared
+ * efforts — an empty list means it honors NO explicit effort, and the caller
+ * hides the select — while a failed lookup (reasoning undefined, support
+ * genuinely unknown) falls back to the canonical table. When the model names
+ * no default effort the display-only `provider-default` entry is prepended so
+ * the picker never has to default to the first declared level (`off` for the
+ * canonical list) — which would misrepresent "provider default" as "thinking
+ * off". The default NEVER falls back to `off`.
  */
 export function thoughtLevelOptionOptions(
   reasoning: ModelReasoning | undefined,
 ): readonly EffortLevel[] {
-  const efforts = effortOptionsFor(reasoning)
+  const efforts = reasoning !== undefined ? reasoning.efforts : CANONICAL_REASONING_LEVELS
   if (efforts.length === 0) return []
   if (reasoning?.defaultEffort !== undefined) return efforts
   return [
@@ -131,7 +108,7 @@ const PERMISSION_LABELS: Readonly<Record<string, string>> = {
   'danger-full-access': 'Full access',
 }
 
-export function permissionLabel(name: string): string {
+function permissionLabel(name: string): string {
   return PERMISSION_LABELS[name] ?? name
 }
 

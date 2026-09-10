@@ -2,10 +2,33 @@
 // the durable model-selection fold (design.zh.md §6.2/§6.3 primitives).
 import { describe, expect, it } from 'vitest'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import { createInflight, lastModelSelection, lastSessionTitle, makeRecord, removeRecord, type PromptInflight, type SessionRecord } from '../src/bridge/session-store.js'
+import { createInflight, lastModelSelection, lastSessionTitle, makeRecord, removeRecord, sessionDirForDelete, type PromptInflight, type SessionRecord } from '../src/bridge/session-store.js'
 
 /** Minimal session event fixture (seq/time are irrelevant to the fold). */
 const event = (type: string, data: unknown): SessionEvent => ({ type, seq: 0, time: 0, data }) as never
+
+describe('sessionDirForDelete (durable-delete safety fence)', () => {
+  const root = '/home/u/.dsh/sessions'
+  const id = '23124675-8e8d-45e8-9cd3-1b1c474bec82'
+
+  it('resolves the session directory of a current-generation artifact', () => {
+    expect(sessionDirForDelete(`${root}/--ws-proj--/${id}/session.jsonl`, root)).toBe(`${root}/--ws-proj--/${id}`)
+    expect(sessionDirForDelete(`${root}/--ws-proj--/session-${id}/session.v3.jsonl.zstd`, root))
+      .toBe(`${root}/--ws-proj--/session-${id}`)
+  })
+
+  it('refuses an artifact outside the sessions root', () => {
+    expect(sessionDirForDelete(`/tmp/${id}/session.jsonl`, root)).toBeUndefined()
+    expect(sessionDirForDelete(`${root}-evil/${id}/session.jsonl`, root)).toBeUndefined()
+  })
+
+  it('refuses a directory that is not a session identity', () => {
+    expect(sessionDirForDelete(`${root}/--ws-proj--/not-a-uuid/session.jsonl`, root)).toBeUndefined()
+    expect(sessionDirForDelete(`${root}/--ws-proj--/${id}.bak/session.jsonl`, root)).toBeUndefined()
+    // The artifact itself must sit one level below the session directory.
+    expect(sessionDirForDelete(`${root}/session.jsonl`, root)).toBeUndefined()
+  })
+})
 
 describe('removeRecord identity guard', () => {
   const recordFor = (id: string): SessionRecord => makeRecord(

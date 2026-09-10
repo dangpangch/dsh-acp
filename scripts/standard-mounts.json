@@ -1,5 +1,5 @@
 {
-  "source": "golden baseline of the standard preset mount surface on the 0.1.2-rc.1 corridor (lib/dev-bin.js + DSH_ACP_SNAPSHOT_MOUNTS=1). Regenerate when the corridor or preset roster changes: boot a session under the snapshot gate and copy its sidecar here (see scripts/conformance.mjs mount audit).",
+  "source": "golden baseline of the standard preset mount surface on the 0.1.5-rc.1 corridor (lib/dev-bin.js + DSH_ACP_SNAPSHOT_MOUNTS=1; the 0.1.5 base drops the str_replace_editor row and the standard preset adds present). Regenerate when the corridor or preset roster changes: boot a session under the snapshot gate and copy its sidecar here (see scripts/conformance.mjs mount audit).",
   "tools": [
     "ask_user_question",
     "bash",
@@ -14,12 +14,12 @@
     "job_list",
     "job_output",
     "list_agents",
+    "present",
     "ralph",
     "read",
     "read_image",
     "send_message",
     "skill",
-    "str_replace_editor",
     "subagent",
     "subagent_fork",
     "todo_write",

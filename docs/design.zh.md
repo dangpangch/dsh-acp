@@ -11,7 +11,8 @@ dsh-acp-v1 **本质上是一个 dsh plugin**（dsh bundle 包，声明
 
 - 补足 **dsh 原生 ACP 缺失的能力**：官方 `@deepseek-ai/dsh-acp` 是
   automation-only（fresh-only、committed-only、无交互面），与 Zed 的交互要求
-  不兼容；本插件是其**交互档补充**。
+  不兼容；本插件是其**交互档补充**。走廊基线 = `dsh 0.1.5-rc.1`（官方同版本
+  仍为 automation-only：不注册 `session/load`/`delete`、不发布 live delta）。
 - 把 DeepSeek Harness 作为 **Zed Editor 的自定义 agent server extension**
   提供（交互式 ACP v1 服务器，经 `dsh plugin --profile acp add <url|dir>`
   装入 profile、`dsh --profile acp` 启动，走 stdio + JSON-RPC）。
@@ -24,7 +25,9 @@ dsh-acp-v1 **本质上是一个 dsh plugin**（dsh bundle 包，声明
 - `cordis.patch.yml` 一行一个补丁（`- insert:` 追加行 / `{id, config}` 替换整
   行 config）：
   - `system-prompt`：ACP 会话专属简洁编码 persona（含 sandbox 提示、验证工作
-    的要求），**替换** dsh-base 默认 persona；
+    的要求），**替换** dsh-base 默认 persona。0.1.5-rc.1 起该行 schema 为
+    `personaPrefix`（首段，第一方指导之前）+ `personaSuffix`（环境说明），旧
+    的单一 `persona` 键已移除；`{{model}}`/`{{cwd}}` 仍是严格插值变量；
   - `hmr.disabled: true`：ACP stdio 会话不能热重载（会撕断连接）；
   - `agent-presets`（`@deepseek-ai/dsh-agent-presets`，`default: standard`）：
     每个 ACP agent 由 preset 组合；部署覆盖 `DSH_ACP_PRESET` 由桥在会话创建时
@@ -62,7 +65,7 @@ dsh-acp-v1 **本质上是一个 dsh plugin**（dsh bundle 包，声明
 | `session/list` | `ctx.sessionQuery.listSessions` | 最新在前，header 摘要 |
 | `session/load` | `agents.resume` + **回放历史通知流** | ACP 语义 = 把完整历史作为通知回放给客户端（见 §4） |
 | `session/resume` | `agents.resume`（不回放） | 恢复上下文继续对话 |
-| `session/close`/`delete`/`cancel` | 对应 quiescent teardown / sessionQuery 删除 | cancel 后回合以 `cancelled` 结束 |
+| `session/close`/`delete`/`cancel` | 对应 quiescent teardown / 后端 `sessionPersistence.resolveCurrentLog` + 路径围栏删目录 | cancel 后回合以 `cancelled` 结束；delete 只删 `$DSH_HOME/sessions/<bucket>/<uuid>/` |
 
 ### 3.2 prompt 入口与内容
 
@@ -80,9 +83,17 @@ dsh-acp-v1 **本质上是一个 dsh plugin**（dsh bundle 包，声明
 
 ### 3.3 流式与回合结束
 
-- `session/event` 监听：`assistant/chunk`（text/reasoning delta）按
-  (turn,step,index) 折叠增量 → `agent_message_chunk` / `agent_thought_chunk`
-  （只发新尾缀，杜绝重复）；提交块 `assistant/message` 只补缺失尾段。
+- live delta 源（0.1.5-rc.1）：Agent 事件 `agent/assistant-stream` 的
+  start/chunk/end 帧（`AssistantStreamFrame`）。仅 **start 帧**携带
+  turn/step，故 attemptId → (turn,step) 的映射存在 `SessionRecord` 上；新
+  attempt（重试/替换）在 start 时清掉同一 `turn:step:` 前缀的累积，abandoned
+  的 end 再清一次（否则提交块 `committedBlockRemainder` 会与已废弃 attempt 的
+  文本比对失败而整段不发）。chunk 帧的 `chunk.index` 才是内容块下标，去重键
+  仍是 `${turn}:${step}:${blockIndex}`（**不是** `frame.index`，那是 attempt
+  内稠密帧序号）。映射本体是纯函数 `foldStreamFrame`（`updates.ts`），
+  `session/event` 侧不再有 `assistant/chunk`（该 durable 事件已在 0.1.5 移除）。
+- 折叠增量 → `agent_message_chunk` / `agent_thought_chunk`（只发新尾缀，杜绝
+  重复）；提交块 `assistant/message` 只补缺失尾段。
 - 回合结束按 `codec.ts` 表映射 stopReason（completed/aborted/blocked/error →
   `end_turn`，interrupted → `cancelled`，max-tokens → `max_tokens`）；
   **error 结尾不平账为 stopReason**，而是把在途 `session/prompt` 以 internal
@@ -100,7 +111,9 @@ dsh-acp-v1 **本质上是一个 dsh plugin**（dsh bundle 包，声明
   命令类工具（bash/pwsh）标题 = `工具名 + description`（模型写的摘要，
   缺省回落命令行；400 字符截断 + `…`），与路径类同构；路径类工具
   （read/read_image/write/edit/str_replace_editor/rm）标题 = `工具名 +
-  显示路径`（绝对路径在 cwd 下时显示为 cwd 相对；live/replay 语义一致）；
+  显示路径`（绝对路径在 cwd 下时显示为 cwd 相对；live/replay 语义一致）。
+  str_replace_editor 自 0.1.5-rc.1 起不再由 base/standard preset 挂载
+  （`tool-str-replace-editor` 行移除），其卡片/回放规则保留以复现旧日志；
   search 类 = `工具名 + pattern`（` in <path>` 作用域可选，与宿主自身搜索
   卡同款）；其余（todo_write、ask_user_question…）与解析不出参数的调用
   保持裸工具名。
@@ -220,6 +233,7 @@ prompt。diff 卡片与 locations 属于 `tool_call`/`tool_call_update` 的可�
 | 预设/路由 | 部署字段：`DSH_ACP_PRESET`/`DSH_ACP_PROVIDER`/`DSH_ACP_MODEL` 由桥在会话/agent 创建时读取（改 env 需重启）。预设=工具集，**不进会话选择器**（中途换会破坏 session 语义）；newSession 对无 root 供给的取值回 invalidParams 并列出可用预设（P1-4）。patch 行保持字面量默认值——本走廊 loader 对 patch 行 `!!js` 的求值时机不可依赖（cnctem 的 `!!js` 写法属其 rc.2 走廊，未在本走廊复现），故由桥代码统一处理 env |
 | MCP | 不挂载：非空 mcpServers → 接受并忽略（stderr 记录；拒绝会把 Zed 的正常请求变不可用，P1-6） |
 | 能力纪律 | 先实现、后声明（list/load/delete/resume 随实现同步开启） |
+| 走廊基线 | 精确钉 `0.1.5-rc.1`（单 cohort，无混合 peer）。迁移账本与证据见 `docs/compat-audit-0.1.5-rc.1.zh.md`；`scripts/standard-mounts.json` 随预设名册再基线化（−str_replace_editor，+present）。0.1.2-rc.1→0.1.5-rc.1 段在本地升级技能里无版本卡（卡片止于 rc.1），结论由已发布产物 + 声明面对照 + 可复现实测派生，属**已声明的缺口段** |
 
 ## 6. 验证与验收
 
@@ -227,9 +241,10 @@ prompt。diff 卡片与 locations 属于 `tool_call`/`tool_call_update` 的可�
 
 ```bash
 pnpm typecheck && pnpm build          # tsc --noEmit；tsdown -> lib/
-pnpm test                             # vitest（117 项；含真实 spawn 的帧纯净与会话历史探针）
+pnpm test                             # vitest（157 项；含真实 spawn 的帧纯净、会话历史、elicitation 门控探针）
+node scripts/conformance.mjs          # ACP v1 wire 一致性 + mount 审计（golden 精确比对）
+node scripts/preset-smoke.mjs         # 部署字段 DSH_ACP_PRESET/PROVIDER/MODEL
 node scripts/history-probe.mjs        # 会话历史端到端（隔离 DSH_HOME）
-node scripts/wire-drive.mjs           # stub-LLM wire 探针：execute 卡终端回显 + 回退路径（隔离 DSH_HOME）
 # dev boot smoke（隔离 DSH_HOME）
 printf '…initialize…\n…session/new…' | node lib/dev-bin.js   # 2 result + exit 0
 # CLI profile smoke（隔离 DSH_HOME）
@@ -281,5 +296,5 @@ src/bridge/{codec,updates,content,config-options,session-store}.ts  纯映射/bu
 src/dev-bin.ts          独立 dev/test boot（dsh-base + 本包 patch + presets fixture）
 cordis.patch.yml        bundle 补丁（§2.1）
 scripts/history-probe.mjs  会话历史端到端探针
-scripts/wire-drive.mjs     stub-LLM wire 探针（wire-probe.mjs 引导 + acp-client 驱动；验证 bash 卡的标题与文本输出帧）
+scripts/conformance.mjs    ACP v1 wire 一致性 + 挂载审计（wire-probe.mjs 引导 + acp-client 驱动）
 ```

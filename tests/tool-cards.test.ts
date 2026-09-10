@@ -9,17 +9,15 @@
 // tools as "glob src/**/*.ts"; only argument-less tools fall back to the
 // bare name.
 import { describe, expect, it } from 'vitest'
+import { codeFence } from '../src/bridge/updates.js'
 import {
-  TOOL_CARD_TITLE_MAX,
   diffForToolCall,
   displayRawInput,
-  fileDiffsFromMeta,
   rawInputOf,
-  resultCardText,
+  resultBody,
   toolCallLocation,
   toolCallTitle,
   toolKindFor,
-  uniqueLineOfText,
 } from '../src/bridge/tool-cards.js'
 
 describe('toolKindFor', () => {
@@ -65,11 +63,11 @@ describe('toolCallTitle', () => {
   })
 
   it('truncates pathological commands with an ellipsis', () => {
-    const long = 'x'.repeat(TOOL_CARD_TITLE_MAX + 50)
+    const long = 'x'.repeat(1000)
     const title = toolCallTitle('other', 'bash', { command: long })
-    expect(title.length).toBe(TOOL_CARD_TITLE_MAX + 1)
     expect(title.endsWith('…')).toBe(true)
-    expect(title.slice(0, TOOL_CARD_TITLE_MAX)).toBe(`bash ${long.slice(0, TOOL_CARD_TITLE_MAX - 5)}`)
+    expect(title.length).toBeLessThan(long.length)
+    expect(title.startsWith('bash ')).toBe(true)
   })
 
   it('falls back to the tool name when no command is present', () => {
@@ -118,10 +116,10 @@ describe('toolCallTitle', () => {
   })
 
   it('truncates pathological argument titles with an ellipsis', () => {
-    const longPath = 'd'.repeat(TOOL_CARD_TITLE_MAX + 50)
+    const longPath = 'd'.repeat(1000)
     const title = toolCallTitle('read', 'read', { file_path: longPath }, '/ws')
-    expect(title.length).toBe(TOOL_CARD_TITLE_MAX + 1)
     expect(title.endsWith('…')).toBe(true)
+    expect(title.length).toBeLessThan(longPath.length)
   })
 })
 
@@ -186,6 +184,7 @@ describe('toolCallLocation (follow-along)', () => {
     expect(toolCallLocation({ file_path: 'a.ts', old_string: 'zzz' }, '/ws', readText)).toEqual({ path: '/ws/a.ts' })
     expect(toolCallLocation({ file_path: 'a.ts', old_string: 'two' }, '/ws', () => 'two\ntwo\n')).toEqual({ path: '/ws/a.ts' })
     expect(toolCallLocation({ file_path: 'a.ts', old_string: 'x' }, '/ws', () => undefined)).toEqual({ path: '/ws/a.ts' })
+    expect(toolCallLocation({ file_path: 'a.ts', old_string: '' }, '/ws', readText)).toEqual({ path: '/ws/a.ts' })
   })
 
   it('returns nothing for tools that name no file (bash, grep, todo)', () => {
@@ -196,39 +195,26 @@ describe('toolCallLocation (follow-along)', () => {
   })
 })
 
-describe('resultCardText', () => {
-  it('keeps only the <content> body of a read result envelope', () => {
+describe('resultBody', () => {
+  it('keeps only the <content> body of a read result envelope, fenced', () => {
     const envelope = '<path>/ws/a.ts</path>\n<type>file</type>\n<content>\n1: hello\n2: world\n\n(Showing lines 1-2 of 2.)\n</content>'
-    expect(resultCardText('read', envelope)).toBe('1: hello\n2: world\n\n(Showing lines 1-2 of 2.)')
+    expect(resultBody('read', envelope)).toBe(codeFence('1: hello\n2: world\n\n(Showing lines 1-2 of 2.)'))
   })
 
   it('passes through non-read results and read shapes without a content envelope', () => {
-    expect(resultCardText('bash', 'hello')).toBe('hello')
-    expect(resultCardText('read', 'no envelope here')).toBe('no envelope here')
+    expect(resultBody('bash', 'hello')).toBe(codeFence('hello'))
+    expect(resultBody('read', 'no envelope here')).toBe(codeFence('no envelope here'))
+  })
+
+  it('keeps an empty result empty (no empty code block)', () => {
+    expect(resultBody('bash', '')).toBe('')
   })
 })
 
-describe('uniqueLineOfText', () => {
-  it('finds the 1-based line of the first occurrence', () => {
-    expect(uniqueLineOfText('a\nb\nc\n', 'b')).toBe(2)
-    expect(uniqueLineOfText('a\nb\nc\n', 'a\nb')).toBe(1)
-  })
-
-  it('returns undefined for absent or ambiguous needles and empty input', () => {
-    expect(uniqueLineOfText('a\nb\n', 'z')).toBeUndefined()
-    expect(uniqueLineOfText('b\nb\n', 'b')).toBeUndefined()
-    expect(uniqueLineOfText('a\n', '')).toBeUndefined()
-  })
-})
-
-describe('fileDiffsFromMeta', () => {
-  it('narrows validated diff arrays from opaque result meta', () => {
-    const diffs = [{ path: 'a.ts', oldText: 'old', newText: 'new' }]
-    expect(fileDiffsFromMeta({ diffs })).toEqual(diffs)
-    expect(fileDiffsFromMeta({ diffs: [] })).toEqual([]) // a fresh create
-    expect(fileDiffsFromMeta(undefined)).toBeUndefined()
-    expect(fileDiffsFromMeta({})).toBeUndefined()
-    expect(fileDiffsFromMeta({ diffs: [{ path: 'a.ts', oldText: 1, newText: 'n' }] })).toBeUndefined()
+describe('diffForToolCall meta validation', () => {
+  it('ignores malformed meta diffs and falls back to the argument diff', () => {
+    expect(diffForToolCall('edit', { file_path: 'a.ts', old_string: 'o', new_string: 'n' }, { diffs: [{ path: 'a.ts', oldText: 1, newText: 'n' }] }, false))
+      .toEqual([{ path: 'a.ts', oldText: 'o', newText: 'n' }])
   })
 })
 

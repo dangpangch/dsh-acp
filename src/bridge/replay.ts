@@ -15,7 +15,7 @@
 // sdk types only) so the whole mapping is unit-testable offline.
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { SessionNotification } from '@agentclientprotocol/sdk'
-import { assistantTextChunk, assistantThoughtChunk, foldTodoPlan, planUpdate, toolCallContent, toolCallDiffContent, userMessageChunk } from './updates.js'
+import { assistantTextChunk, assistantThoughtChunk, toolCallContent, toolCallDiffContent, userMessageChunk } from './updates.js'
 import { diffForToolCall, displayRawInput, rawInputOf, resultBody, toolCallLocation, toolCallTitle, toolKindFor, toolResultCall } from './tool-cards.js'
 /** Replay context per call id: the pairing a live session keeps in the firehose. */
 interface ReplayCall {

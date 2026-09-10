@@ -5,7 +5,27 @@
 // inflight state transitions are unit-testable without a harness.
 import type { Agent, AgentHandle, ModelSelection, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import type { AgentCancelCause, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import { basename, dirname, sep } from 'node:path'
 import type { AcpStopReason } from './codec.js'
+
+/** A session directory name: a UUID, optionally `session-` prefixed. */
+const SESSION_DIR_NAME = /^(session-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Resolve the session directory one stored-log artifact belongs to, or
+ * `undefined` when the path must not be deleted. The one safety gate for ACP
+ * `session/delete`: the artifact must live under the harness sessions root and
+ * its own directory must carry a session identity, so a backend returning an
+ * unexpected path can never turn the RPC into a wider delete.
+ */
+export function sessionDirForDelete(artifactPath: string, sessionsRoot: string): string | undefined {
+  // The separator boundary matters: a plain prefix test would admit a sibling
+  // like `<sessionsRoot>-evil/`.
+  const base = sessionsRoot.endsWith(sep) ? sessionsRoot : sessionsRoot + sep
+  if (!artifactPath.startsWith(base)) return undefined
+  const dir = dirname(artifactPath)
+  return SESSION_DIR_NAME.test(basename(dir)) ? dir : undefined
+}
 
 /** One in-flight `session/prompt`: the exact settlement bookkeeping. */
 export interface PromptInflight {
@@ -72,6 +92,13 @@ export interface SessionRecord {
   streamedText: Map<string, string>
   /** Accumulated streamed reasoning per turn/step/block (delta dedupe). */
   streamedReasoning: Map<string, string>
+  /**
+   * Live `agent/assistant-stream` attempt bookkeeping: attempt id -> the
+   * turn/step the attempt started. Only the start frame carries turn/step, so
+   * chunk frames resolve them through this map; each attempt ends by removing
+   * its own entry.
+   */
+  streamAttempts: Map<string, { turn: number; step: number }>
   /** True while the record streams historical replay (no live output yet). */
   replaying: boolean
   /** Session title most recently pushed on the wire (session_info_update dedupe). */
@@ -147,6 +174,7 @@ export function makeRecord(
     allowedTools: new Set(),
     streamedText: new Map(),
     streamedReasoning: new Map(),
+    streamAttempts: new Map(),
   }
 }
 

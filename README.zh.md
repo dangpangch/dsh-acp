@@ -12,11 +12,11 @@ Agent Panel 里使用 DeepSeek Harness 的 agent：建/关线程、文本与思�
 
 ## 前提
 
-- dsh CLI（验证于 `0.1.2-rc.1`）——先全局安装：
+- dsh CLI（验证于 `0.1.5-rc.1`）——先全局安装：
 
   ```bash
-  npm install -g @deepseek-ai/dsh
-  dsh --version   # → 0.1.2-rc.1
+  npm install -g @deepseek-ai/dsh@0.1.5-rc.1
+  dsh --version   # → 0.1.5-rc.1
   ```
 
 - pnpm（`dsh plugin` 转发给 pnpm）
@@ -50,6 +50,28 @@ dsh plugin --profile acp add /path/to/dsh-acp
 ```bash
 pnpm build   # tsdown -> lib/
 ```
+
+### 装完先检查 bundle 列表
+
+`dsh plugin --profile acp add` 会按 CLI 模板初始化 profile；0.1.5 线起该模板
+还会带上**官方 automation-only 的 `@deepseek-ai/dsh-acp-app`**。那种组合下应答
+客户端的是官方桥（`agentInfo.name = deepseek-harness-acp`，无 `session/close`、
+无 live delta），本插件拿不到连接。
+
+请在 profile 自己的 `package.json` 里把它去掉，使 bundle 列表恰为
+base + 本插件，然后重启 profile：
+
+```jsonc
+// ~/.dsh/profiles/acp/package.json
+"dsh": {
+  "profile": {
+    "bundles": ["@deepseek-ai/dsh-base", "dsh-acp-v1"]
+  }
+}
+```
+
+用 `dsh --profile acp` + `initialize` 核对：`agentInfo.name` 必须是
+`dsh-acp-v1`。
 
 ## Zed 配置
 
@@ -143,7 +165,9 @@ agent 预设与默认模型路由是**部署字段**，启动时从环境变量�
 pnpm install
 pnpm typecheck   # tsc --noEmit
 pnpm build       # tsdown -> lib/
-pnpm test        # vitest（136 项，含真实 spawn 的帧纯净与会话历史探针）
+pnpm test        # vitest（160 项，含真实 spawn 的帧纯净与会话历史探针）
+node scripts/conformance.mjs     # ACP v1 wire 一致性 + 挂载审计
+node scripts/preset-smoke.mjs    # 部署字段（preset/provider/model）
 node scripts/history-probe.mjs   # 会话历史端到端（隔离 DSH_HOME）
 ```
 

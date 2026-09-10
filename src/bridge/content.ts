@@ -20,7 +20,7 @@ export type AttachmentStoreSeam = Pick<AttachmentStore, 'saveImages'> & {
 /** Raster formats shared by ACP image blocks and dsh's attachment store. */
 const IMAGE_MEDIA_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
 
-export type MediaType = (typeof IMAGE_MEDIA_TYPES)[number]
+type MediaType = (typeof IMAGE_MEDIA_TYPES)[number]
 
 export function isImageMediaType(mimeType: string): mimeType is MediaType {
   return (IMAGE_MEDIA_TYPES as readonly string[]).includes(mimeType)
@@ -30,7 +30,7 @@ export function isImageMediaType(mimeType: string): mimeType is MediaType {
  * Canonical RFC 4648 base64: whitespace and URL-safe aliases rejected before
  * the durable admission call, so wire bytes never reach the store uncleaned.
  */
-export const CANONICAL_BASE64 =
+const CANONICAL_BASE64 =
   /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/
 
 /** Error with a stable request-failure category (wire error mapping). */
@@ -61,7 +61,7 @@ function decodeImage(block: Extract<AcpContentBlock, { type: 'image' }>): Admitt
 }
 
 /** Render one baseline resource link into the core's current text vocabulary. */
-export function resourceLinkText(block: Extract<AcpContentBlock, { type: 'resource_link' }>): string {
+function resourceLinkText(block: Extract<AcpContentBlock, { type: 'resource_link' }>): string {
   return `\n[resource_link name=${JSON.stringify(block.name)} uri=${JSON.stringify(block.uri)}]\n`
 }
 
@@ -72,7 +72,7 @@ export function resourceLinkText(block: Extract<AcpContentBlock, { type: 'resour
  * `embeddedContext: false` advertisement still gets its context through
  * instead of the whole prompt failing.
  */
-export function resourceText(block: Extract<AcpContentBlock, { type: 'resource' }>): string {
+function resourceText(block: Extract<AcpContentBlock, { type: 'resource' }>): string {
   const resource = block.resource as { uri?: unknown; text?: unknown; blob?: unknown; mimeType?: unknown }
   const uri = typeof resource.uri === 'string' ? resource.uri : '(unknown)'
   if (typeof resource.text === 'string') {

@@ -29,9 +29,12 @@ interactive gap left by the official automation-only `@deepseek-ai/dsh-acp`.
   rides `ctx.logger` (stderr). Probe-sidecar files are written to `$DSH_HOME`,
   never stdout.
 - **Corridor pinning**: all `@deepseek-ai/*` dependencies are pinned to the
-  audited dsh version (currently `0.1.2-rc.1`). Version bumps require the
+  audited dsh version (currently `0.1.5-rc.1`). Version bumps require the
   upgrade corridor: `pnpm audit:corridor <from> <to>` + the
-  dsh-upgrade-audit skill, then re-run the mount audit golden.
+  dsh-upgrade-audit skill, then re-run the mount audit golden. When the
+  corridor's version cards do not cover a segment (they stop at `0.1.2-rc.1`),
+  derive the absent edge from published artifacts and record the gap in
+  `docs/compat-audit-<version>.zh.md` — never from memory.
 - **Presets own the model-facing surface**: tools/commands come from the
   mounted preset; host rows are infrastructure. The mount audit
   (`scripts/standard-mounts.json`) enforces this — regenerate it only when
@@ -47,7 +50,7 @@ interactive gap left by the official automation-only `@deepseek-ai/dsh-acp`.
 
 ```bash
 pnpm typecheck && pnpm build
-pnpm test            # 149 tests (pure units + spawned probes)
+pnpm test            # 157 tests (pure units + spawned probes)
 node scripts/conformance.mjs   # wire conformance + mount audit matrix
 node scripts/preset-smoke.mjs  # deployment env fields (P1-4)
 ```

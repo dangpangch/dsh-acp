@@ -95,6 +95,72 @@ export function streamTextDelta(
 }
 
 /**
+ * Drop every accumulation whose key starts with `prefix`. A replacement
+ * assistant attempt (`agent/assistant-stream` start / abandoned end) restarts
+ * its delta indices for the same turn/step, so the previous attempt's
+ * accumulations must not survive into the committed-block remainder check.
+ */
+function clearStreamKeys(acc: Map<string, string>, prefix: string): void {
+  for (const key of [...acc.keys()]) {
+    if (key.startsWith(prefix)) acc.delete(key)
+  }
+}
+
+/** The live-frame shape the bridge folds; structural, so tests need no harness. */
+export type LiveStreamChunk = { type: string; index?: number; text?: string }
+/** One `agent/assistant-stream` publication (dsh 0.1.5-rc.1 Agent event). */
+export type LiveStreamFrame =
+  | { type: 'start'; attemptId: string; turn: number; step: number }
+  | { type: 'chunk'; attemptId: string; chunk: LiveStreamChunk }
+  | { type: 'end'; attemptId: string; outcome: { kind: 'committed' } | { kind: 'abandoned' } }
+
+/** Mutable live-stream bookkeeping owned by one session record. */
+export interface LiveStreamState {
+  /** Attempt id -> the turn/step its start frame named (only start carries them). */
+  attempts: Map<string, { turn: number; step: number }>
+  /** Streamed text per `turn:step:block` (delta accumulation). */
+  text: Map<string, string>
+  /** Streamed reasoning per `turn:step:block` (delta accumulation). */
+  reasoning: Map<string, string>
+}
+
+/**
+ * Fold one live Assistant frame into the record's stream state and return the
+ * chunk to stream with its owning turn/step, when there is one.
+ *
+ * A start frame records the attempt (and clears the turn/step's previous
+ * accumulations: a retry/replacement attempt restarts its delta indices, and
+ * keeping the abandoned text would make the committed-block remainder check
+ * compare against the wrong prefix and send nothing). An end frame forgets the
+ * attempt, and an abandoned end additionally drops its accumulations. Chunks
+ * of an unknown attempt (a record created after its start, or a frame that
+ * raced teardown) are ignored.
+ */
+export function foldStreamFrame(
+  state: LiveStreamState,
+  frame: LiveStreamFrame,
+): { turn: number; step: number; chunk: LiveStreamChunk } | undefined {
+  if (frame.type === 'start') {
+    const prefix = `${frame.turn}:${frame.step}:`
+    clearStreamKeys(state.text, prefix)
+    clearStreamKeys(state.reasoning, prefix)
+    state.attempts.set(frame.attemptId, { turn: frame.turn, step: frame.step })
+    return undefined
+  }
+  const attempt = state.attempts.get(frame.attemptId)
+  if (frame.type === 'end') {
+    state.attempts.delete(frame.attemptId)
+    if (frame.outcome.kind === 'abandoned' && attempt !== undefined) {
+      const prefix = `${attempt.turn}:${attempt.step}:`
+      clearStreamKeys(state.text, prefix)
+      clearStreamKeys(state.reasoning, prefix)
+    }
+    return undefined
+  }
+  return attempt === undefined ? undefined : { turn: attempt.turn, step: attempt.step, chunk: frame.chunk }
+}
+
+/**
  * Decide what still needs delivering when a committed block lands: blocks that
  * never streamed go whole; streamed blocks only resend the missing tail; a
  * mismatch (stream and commit diverged) sends nothing rather than duplicating.

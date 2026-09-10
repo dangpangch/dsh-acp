@@ -14,11 +14,11 @@ inside the dsh sandbox with dsh's own model route.
 
 ## Requirements
 
-- dsh CLI (tested on `0.1.2-rc.1`) — install globally first:
+- dsh CLI (tested on `0.1.5-rc.1`) — install globally first:
 
   ```bash
-  npm install -g @deepseek-ai/dsh
-  dsh --version   # → 0.1.2-rc.1
+  npm install -g @deepseek-ai/dsh@0.1.5-rc.1
+  dsh --version   # → 0.1.5-rc.1
   ```
 
 - pnpm (the `dsh plugin` command delegates to pnpm)
@@ -54,6 +54,29 @@ code, rebuild and the running profile picks it up on next boot:
 ```bash
 pnpm build   # tsdown -> lib/
 ```
+
+### After installing: check the bundle list
+
+`dsh plugin --profile acp add` seeds a fresh profile with the CLI's template,
+which (since the 0.1.5 line) also bundles the **official automation-only
+`@deepseek-ai/dsh-acp-app`**. In that composition the official bridge answers
+the client (`agentInfo.name = deepseek-harness-acp`, no `session/close`, no
+live deltas) and this plugin never gets the connection.
+
+Remove it from the profile's own `package.json` so the bundle list is exactly
+base + this plugin, then restart the profile:
+
+```jsonc
+// ~/.dsh/profiles/acp/package.json
+"dsh": {
+  "profile": {
+    "bundles": ["@deepseek-ai/dsh-base", "dsh-acp-v1"]
+  }
+}
+```
+
+Verify the running bridge with `dsh --profile acp` + `initialize`:
+`agentInfo.name` must be `dsh-acp-v1`.
 
 ## Configure Zed
 
@@ -163,7 +186,9 @@ separately.
 pnpm install
 pnpm typecheck   # tsc --noEmit
 pnpm build       # tsdown -> lib/
-pnpm test        # vitest (136 tests incl. spawned frame-purity + history probes)
+pnpm test        # vitest (160 tests incl. spawned frame-purity + history probes)
+node scripts/conformance.mjs     # ACP v1 wire conformance + mount audit
+node scripts/preset-smoke.mjs    # deployment env fields (preset/provider/model)
 node scripts/history-probe.mjs   # session history end-to-end (isolated DSH_HOME)
 ```
 

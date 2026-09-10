@@ -42,15 +42,6 @@ export type AcpStopReason = 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'r
  * reason).
  */
 export function settledStopReason(kind: DshTurnEndKind): AcpStopReason | null {
-  switch (kind) {
-    case 'completed':
-    case 'aborted':
-    case 'blocked':
-    case 'max-tokens':
-      return 'end_turn'
-    case 'interrupted':
-      return 'cancelled'
-    case 'error':
-      return null
-  }
+  if (kind === 'error') return null
+  return kind === 'interrupted' ? 'cancelled' : 'end_turn'
 }

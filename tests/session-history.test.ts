@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { describe, it } from 'vitest'
 
 const PROBE = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'history-probe.mjs')
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'lib', 'dev-bin.js')

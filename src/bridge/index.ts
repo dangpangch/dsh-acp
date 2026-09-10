@@ -16,7 +16,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { randomUUID } from 'node:crypto'
-import { basename, dirname, isAbsolute, join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { Writable } from 'node:stream'
 import {
   AgentSideConnection,
@@ -41,7 +41,7 @@ import {
 } from '@agentclientprotocol/sdk'
 import { installModelSelection, type ModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, errorChain, ReasoningEffortId, type ContentBlock } from '@deepseek-ai/dsh-llm'
-import type { Agent, AgentCancelCause } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentCancelCause, AssistantStreamFrame } from '@deepseek-ai/dsh-agent'
 // Type-only dependency: registers dsh-user-approval's `approval/request`
 // event on the cordis Events map so the typed ctx.on handler below compiles.
 import type {} from '@deepseek-ai/dsh-user-approval'
@@ -70,6 +70,7 @@ import {
   makeRecord,
   removeRecord,
   requestStop,
+  sessionDirForDelete,
   type PromptInflight,
   type SessionRecord,
   type SessionRegistry,
@@ -80,7 +81,7 @@ import {
   commandsUpdate,
   committedBlockRemainder,
   configOptionsUpdate,
-  elicitationRequestFor,
+  foldStreamFrame,
   foldTodoPlan,
   planUpdate,
   requestPermissionRequest,
@@ -123,7 +124,7 @@ export const Config: Schema<BridgeConfig> = Schema.object({
 })
 
 const AGENT_NAME = 'dsh-acp-v1'
-const AGENT_VERSION = '0.3.0'
+const AGENT_VERSION = '0.4.0'
 const CONFIG_ID_MODEL = 'model'
 const CONFIG_ID_THOUGHT_LEVEL = 'thought_level'
 const CONFIG_ID_PERMISSION = 'permission'
@@ -171,9 +172,17 @@ interface SessionQuerySeam {
   listEvents(sessionId: SessionId, signal?: AbortSignal): Promise<Array<{ time: number }>>
 }
 
-/** Durable-session artifact locator (delete seam; the backend owns removal). */
+/**
+ * Durable-session artifact locator (delete seam; the backend owns removal).
+ * dsh 0.1.5-rc.1 dropped `SessionPersistence.locate()` in favour of the JSONL
+ * backend's generation-aware `resolveCurrentLog(id)`: the artifact path is no
+ * longer a pure function of the header (`cwd` buckets the directory, the
+ * filename carries the format generation), so the backend resolves it. Only a
+ * current-generation log resolves; a session still stored solely in an older
+ * generation returns `undefined` (delete then degrades to a warning).
+ */
 interface PersistenceSeam {
-  locate(header: { readonly id: SessionId }): { kind: string; path: string } | undefined
+  resolveCurrentLog(id: SessionId, signal?: AbortSignal): Promise<string | undefined>
 }
 
 /** Write-permission preset seam (permission config option + /permission). */
@@ -194,7 +203,7 @@ interface CommandRuntimeSeam {
   execute(
     agent: Agent,
     line: string,
-    images: readonly { mediaType: string; data: string }[],
+    submittedAttachments: readonly { type: 'image'; mediaType: string; data: string }[],
     signal: AbortSignal,
   ): Promise<{ result: { kind: 'success' | 'error'; text?: string } } | undefined>
 }
@@ -244,21 +253,18 @@ interface LlmCatalogService {
 
 /** The slash-command line when the prompt starts with '/', else undefined. */
 function slashLine(prompt: readonly AcpContentBlock[]): string | undefined {
-  let text = ''
-  for (const block of prompt) {
-    if (block.type === 'text') text += block.text
-  }
-  const line = text.trimEnd()
+  const line = prompt.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('').trimEnd()
   return line.startsWith('/') ? line : undefined
 }
 
-/** Original wire image blocks as encoded attachments for the command plane. */
-function encodedImages(prompt: readonly AcpContentBlock[]): { mediaType: string; data: string }[] {
-  const images: { mediaType: string; data: string }[] = []
-  for (const block of prompt) {
-    if (block.type === 'image') images.push({ mediaType: block.mimeType, data: block.data })
-  }
-  return images
+/** Original wire image blocks as encoded attachments for the command plane.
+ * dsh 0.1.5-rc.1 narrowed the submission union to a tagged
+ * `CommandSubmitAttachment` (`{type:'image'} & EncodedImageAttachment`), so the
+ * type discriminator is part of the parameter's shape, not decoration. */
+function encodedImages(prompt: readonly AcpContentBlock[]): { type: 'image'; mediaType: string; data: string }[] {
+  return prompt.flatMap((block) =>
+    block.type === 'image' ? [{ type: 'image' as const, mediaType: block.mimeType, data: block.data }] : [],
+  )
 }
 
 /**
@@ -471,6 +477,23 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     }
   }
 
+  /**
+   * Fold one live `agent/assistant-stream` frame into wire deltas.
+   *
+   * dsh 0.1.5-rc.1 replaced the durable `assistant/chunk` session event with a
+   * process-local Agent event carrying start/chunk/end frames: only the start
+   * frame names the turn and step, so the attempt bookkeeping lives on the
+   * record and the mapping itself is the pure `foldStreamFrame`.
+   */
+  const deliverStreamFrame = (record: SessionRecord, frame: AssistantStreamFrame): void => {
+    const live = foldStreamFrame(
+      { attempts: record.streamAttempts, text: record.streamedText, reasoning: record.streamedReasoning },
+      frame,
+    )
+    if (live === undefined) return
+    deliverStreamChunk(record, live.turn, live.step, live.chunk)
+  }
+
   /** Deliver the whole-table todo plan (and its turn/start clear). */
   const deliverPlan = (record: SessionRecord, todos: readonly { content: string; status: 'pending' | 'in_progress' | 'completed' }[]): void => {
     const fold = JSON.stringify(todos)
@@ -660,14 +683,23 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   }
 
   // ── dsh event firehose -> wire updates ────────────────────────────────────
+  // Live assistant deltas ride their own Agent event since 0.1.5-rc.1: the
+  // durable `assistant/chunk` session event is gone (the committed
+  // `assistant/message`/`assistant/attempt` now carries the exact stream), and
+  // `agent/assistant-stream` publishes transient start/chunk/end frames. An
+  // unscoped listener receives every agent's frames (dsh-scope admits untagged
+  // listeners globally), matching the session/event subscribe pattern below.
+  ctx.on('agent/assistant-stream', ({ agent, frame }) => {
+    const record = store.get(agent.session.id)
+    if (record === undefined || record.agent !== agent) return
+    deliverStreamFrame(record, frame)
+  })
+
   ctx.on('session/event', (session, event) => {
     const record = store.get(session.header.id)
     if (record === undefined || record.agent.session !== session) return
     const inflight = record.inflight
     switch (event.type) {
-      case 'assistant/chunk':
-        deliverStreamChunk(record, event.data.turn, event.data.step, event.data.chunk)
-        break
       case 'assistant/message':
         deliverAssistantMessage(record, event.data.turn, event.data.step, event.data.message.content)
         break
@@ -1154,30 +1186,31 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     return { handle, selection }
   }
 
-  /** Best-effort durable delete of one session artifact (idempotent). */
-  const deletePersisted = (header: { id: SessionId; cwd?: string }): void => {
+  /**
+   * Best-effort durable delete of one session artifact (idempotent).
+   *
+   * The backend resolves the artifact path (0.1.5-rc.1 no longer exposes the
+   * header-addressed `locate()`); the two fences below still own the safety
+   * decision: the resolved path must live under `$DSH_HOME/sessions`, and its
+   * session directory must carry a UUID name. A path that only exists in an
+   * older format generation is not current and stays undeleted.
+   */
+  const deletePersisted = async (id: SessionId): Promise<void> => {
     if (persistence === undefined) return
-    if (header.cwd === undefined || header.cwd.length === 0) {
-      logger.warn(`dsh-acp-v1: durable delete skipped: session cwd is unknown`)
-      return
-    }
-    let location
+    let artifact: string | undefined
     try {
-      location = persistence.locate(header as { id: SessionId })
+      artifact = await persistence.resolveCurrentLog(id)
     } catch (error: unknown) {
-      logger.warn(`dsh-acp-v1: persistence locate failed: ${errorChain(error)}`)
+      logger.warn(`dsh-acp-v1: durable delete skipped: resolveCurrentLog failed: ${errorChain(error)}`)
       return
     }
-    if (location === undefined) return
-    const sessionsRoot = join(resolveDshHome(), 'sessions')
-    const artifact = location.path
-    if (!artifact.startsWith(sessionsRoot)) {
-      logger.warn(`dsh-acp-v1: refusing to delete artifact outside the sessions root: ${artifact}`)
+    if (artifact === undefined) {
+      logger.warn(`dsh-acp-v1: durable delete skipped: no current-generation log for ${id}`)
       return
     }
-    const sessionDir = dirname(artifact)
-    if (!/^(session-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(basename(sessionDir))) {
-      logger.warn(`dsh-acp-v1: refusing to delete unexpected artifact layout: ${artifact}`)
+    const sessionDir = sessionDirForDelete(artifact, join(resolveDshHome(), 'sessions'))
+    if (sessionDir === undefined) {
+      logger.warn(`dsh-acp-v1: refusing to delete unexpected session artifact: ${artifact}`)
       return
     }
     try {
@@ -1352,16 +1385,11 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       assertOpen()
       const sessionId = brandSessionId(params.sessionId)
       const online = store.get(sessionId)
-      let cwd = online?.cwd
-      if (cwd === undefined && query !== undefined) {
-        const header = await persistedHeader(sessionId)
-        cwd = header?.cwd
-      }
       if (online !== undefined) {
         removeRecord(store, online)
         await closeOne(online, { kind: 'user' }).catch(() => {})
       }
-      deletePersisted({ id: sessionId, cwd })
+      await deletePersisted(sessionId)
       return {}
     },
 
