@@ -107,9 +107,9 @@ function clearStreamKeys(acc: Map<string, string>, prefix: string): void {
 }
 
 /** The live-frame shape the bridge folds; structural, so tests need no harness. */
-export type LiveStreamChunk = { type: string; index?: number; text?: string }
+type LiveStreamChunk = { type: string; index?: number; text?: string }
 /** One `agent/assistant-stream` publication (dsh 0.1.5-rc.1 Agent event). */
-export type LiveStreamFrame =
+type LiveStreamFrame =
   | { type: 'start'; attemptId: string; turn: number; step: number }
   | { type: 'chunk'; attemptId: string; chunk: LiveStreamChunk }
   | { type: 'end'; attemptId: string; outcome: { kind: 'committed' } | { kind: 'abandoned' } }

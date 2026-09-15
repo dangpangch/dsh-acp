@@ -11,7 +11,7 @@
 /** Display-only thinking-level id meaning "let the provider decide". */
 export const PROVIDER_DEFAULT_REASONING_EFFORT = 'provider-default'
 
-export interface EffortLevel {
+interface EffortLevel {
   readonly id: string
   readonly name: string
   readonly description: string | null
@@ -175,7 +175,7 @@ export function presetSelectOptionList(
   return { options, currentValue }
 }
 
-export interface CatalogModel {
+interface CatalogModel {
   readonly id: string
   readonly name?: string | undefined
   readonly description?: string | null | undefined
@@ -187,7 +187,7 @@ export interface CatalogProvider {
   readonly models: readonly CatalogModel[]
 }
 
-export interface CurrentRoute {
+interface CurrentRoute {
   readonly provider: string | undefined
   readonly model: string | undefined
 }

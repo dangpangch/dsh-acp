@@ -4,7 +4,7 @@
 // flush persistence, scoped to the addressed session only. The registry and
 // inflight state transitions are unit-testable without a harness.
 import type { Agent, AgentHandle, ModelSelection, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
-import type { AgentCancelCause, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import type { AgentCancelCause, SessionEvent, SessionEventMap, SessionId } from '@deepseek-ai/dsh-session'
 import { basename, dirname, sep } from 'node:path'
 import type { AcpStopReason } from './codec.js'
 
@@ -212,35 +212,40 @@ export function requestStop(record: SessionRecord, cause: AgentCancelCause): voi
 }
 
 /**
- * The model selection to restore for a reloaded session: the LAST
- * `model/selection` snapshot in the durable log (later writes win). Sessions
- * predating the snapshot never carry one — callers then keep their configured
- * defaults.
+ * The LAST payload of one event type in the durable log (later writes win), or
+ * undefined when the log never carried one. The shared fold behind every
+ * "restore the session's last X" read.
  */
-export function lastModelSelection(events: readonly SessionEvent[]): ModelSelection | undefined {
+function lastEventPayload<T extends keyof SessionEventMap>(
+  events: readonly SessionEvent[],
+  type: T,
+): SessionEventMap[T] | undefined {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]!
-    if (event.type !== 'model/selection') continue
-    return { ...event.data }
+    if (event.type === type) return event.data as SessionEventMap[T]
   }
   return undefined
 }
 
 /**
- * The LAST `agent-preset/selected` snapshot in the durable log (later writes
- * win), so a reloaded session is composed from the preset its history actually
- * ran under. dsh's own reconstruction reads the `agentPreset` session
- * projection, never the creation header alone: a pre-turn switch leaves the
- * header naming the ORIGINAL default. Sessions predating the event return
- * undefined and the caller keeps the stored header value.
+ * The model selection to restore for a reloaded session (LAST snapshot wins).
+ * Sessions predating the snapshot never carry one — callers then keep their
+ * configured defaults.
+ */
+export function lastModelSelection(events: readonly SessionEvent[]): ModelSelection | undefined {
+  const selection = lastEventPayload(events, 'model/selection')
+  return selection !== undefined ? { ...selection } : undefined
+}
+
+/**
+ * The LAST `agent-preset/selected` snapshot, so a reloaded session is composed
+ * from the preset its history actually ran under. dsh's own reconstruction
+ * reads the `agentPreset` session projection, never the creation header alone:
+ * a pre-turn switch leaves the header naming the ORIGINAL default. Sessions
+ * predating the event return undefined and the caller keeps the stored header.
  */
 export function lastAgentPreset(events: readonly SessionEvent[]): string | undefined {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index]!
-    if (event.type !== 'agent-preset/selected') continue
-    return event.data.agentPreset
-  }
-  return undefined
+  return lastEventPayload(events, 'agent-preset/selected')?.agentPreset
 }
 
 /**
@@ -255,16 +260,11 @@ export function hasStartedTurn(events: readonly SessionEvent[]): boolean {
 }
 
 /**
- * The LAST `session/title` snapshot in the durable log (later writes win), so
- * a reloaded session can push its own title to the client — the firehose
- * never re-delivers historical title events. Title-less sessions return
- * undefined and the client keeps its provisional title.
+ * The LAST `session/title` snapshot, so a reloaded session can push its own
+ * title to the client — the firehose never re-delivers historical title
+ * events. Title-less sessions return undefined and the client keeps its
+ * provisional title.
  */
 export function lastSessionTitle(events: readonly SessionEvent[]): string | undefined {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index]!
-    if (event.type !== 'session/title') continue
-    return event.data.title
-  }
-  return undefined
+  return lastEventPayload(events, 'session/title')?.title
 }

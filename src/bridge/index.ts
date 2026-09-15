@@ -41,7 +41,7 @@ import {
 } from '@agentclientprotocol/sdk'
 import { installModelSelection, type ModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, errorChain, ReasoningEffortId, type ContentBlock } from '@deepseek-ai/dsh-llm'
-import type { Agent, AgentCancelCause, AssistantStreamFrame } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentCancelCause, AgentHandle, AgentSetup, AssistantStreamFrame } from '@deepseek-ai/dsh-agent'
 // Type-only dependency: registers dsh-user-approval's `approval/request`
 // event on the cordis Events map so the typed ctx.on handler below compiles.
 import type {} from '@deepseek-ai/dsh-user-approval'
@@ -89,14 +89,12 @@ import {
   requestPermissionRequest,
   sessionInfoUpdate,
   streamTextDelta,
-  toolCallContent,
-  toolCallDiffContent,
   usageUpdate,
 } from './updates.js'
 import { askViaForm, type ElicitationBridge } from './elicitation.js'
 import { replayUpdatesForEvent } from './replay.js'
 import { mergeSlashCatalog, normalizeSkillSlashText, type SlashCatalogEntry, type SlashCommandEntry, type SlashSkillEntry } from './catalog.js'
-import { diffForToolCall, displayRawInput, rawInputOf, resultBody, toolCallLocation, toolCallTitle, toolKindFor, toolResultCall } from './tool-cards.js'
+import { rawInputOf, toolCallCard, toolResultCall, toolResultCard } from './tool-cards.js'
 import {
   guardReasoningEffort,
   modelSelectOptionList,
@@ -155,7 +153,7 @@ type WireConfigOptions = NonNullable<NewSessionResponse['configOptions']>
 
 /** Agent-presets roster seam (default-preset join per session, best effort). */
 interface AgentPresetsSeam {
-  resolve(id?: string): Promise<{ readonly id: string }> | { readonly id: string }
+  resolve(id?: string): Promise<{ readonly id: string }>
   mount(ctx: unknown, id: string): Promise<unknown>
   /** Optional roster listing: the preset select's options and default errors. */
   list?(): Promise<readonly PresetChoice[]>
@@ -330,14 +328,27 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     return preset !== undefined && preset.trim() !== '' ? preset : undefined
   }
 
-  /** Best-effort default-preset id from the roster (undefined when absent or broken). */
-  const defaultPresetId = async (): Promise<string | undefined> => {
+  /**
+   * The preset to compose a session from: a persisted pick wins, else
+   * `DSH_ACP_PRESET`, else the roster default. `strict` (new sessions, P1-4)
+   * turns an unresolvable deployment default into a client-visible config
+   * error listing the available ids; best-effort (reload) warns and keeps the
+   * global-layer session. An absent roster degrades either way.
+   */
+  const presetForSpawn = async (persisted: string | undefined, strict: boolean): Promise<string | undefined> => {
+    if (persisted !== undefined) return persisted
     if (presets === undefined) return undefined
     try {
-      return (await presets.resolve(presetIdForEnv()))?.id
+      return (await presets.resolve(presetIdForEnv())).id
     } catch (error: unknown) {
-      logger.warn(`dsh-acp-v1: default agent preset unavailable: ${errorChain(error)}`)
-      return undefined
+      if (!strict) {
+        logger.warn(`dsh-acp-v1: default agent preset unavailable: ${errorChain(error)}`)
+        return undefined
+      }
+      const label = presetIdForEnv() !== undefined ? 'DSH_ACP_PRESET preset' : 'default agent preset'
+      const message = `${label} unavailable: ${errorChain(error)}`
+      const available = await availablePresetIds()
+      throw new PresetDefaultError(available === undefined ? message : `${message} — available: ${available}`)
     }
   }
 
@@ -360,22 +371,6 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   const availablePresetIds = async (): Promise<string | undefined> => {
     const rows = await rosterRows()
     return rows?.map((row) => row.id).join(', ')
-  }
-
-  /** Strict default-preset id for NEW sessions (P1-4): the default is a
-   * deployment field (DSH_ACP_PRESET), so a default no root supplies is a
-   * client-visible config error, never a silent global-layer session. An
-   * absent roster (no preset seats at all) still degrades. */
-  const strictDefaultPresetId = async (): Promise<string | undefined> => {
-    if (presets === undefined) return undefined
-    try {
-      return (await presets.resolve(presetIdForEnv()))?.id
-    } catch (error: unknown) {
-      const label = presetIdForEnv() !== undefined ? 'DSH_ACP_PRESET preset' : 'default agent preset'
-      const message = `${label} unavailable: ${errorChain(error)}`
-      const available = await availablePresetIds()
-      throw new PresetDefaultError(available === undefined ? message : `${message} — available: ${available}`)
-    }
   }
 
   const requireSession = (sessionId: SessionId): SessionRecord => {
@@ -447,9 +442,15 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     })
   }
 
-  /** Chain one synchronous serialization task onto the delivery tail. */
+  /**
+   * Chain one serialization task onto the delivery tail. A closed or
+   * replaying record sends nothing, so the tasks themselves need no precheck.
+   */
   const serialize = (record: SessionRecord, task: () => Promise<void>): void => {
-    record.outputTail = record.outputTail.then(task).catch((error: unknown) => {
+    record.outputTail = record.outputTail.then(async () => {
+      if (record.closed || record.replaying) return
+      await task()
+    }).catch((error: unknown) => {
       const inflight = record.inflight
       if (inflight !== undefined) inflight.outputError ??= new Error(String(error))
       logger.warn(`dsh-acp-v1: output conversion failed: ${errorChain(error)}`)
@@ -470,7 +471,6 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   /** Map a committed assistant message, resending only unstreamed remainders. */
   const deliverAssistantMessage = (record: SessionRecord, turn: number, step: number, blocks: readonly ContentBlock[]): void => {
     serialize(record, async () => {
-      if (record.closed || record.replaying) return
       for (let index = 0; index < blocks.length; index += 1) {
         const block = blocks[index]!
         const key = `${turn}:${step}:${index}`
@@ -541,22 +541,18 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     if (record.closed || record.replaying || record.lastPushedTitle === title) return
     record.lastPushedTitle = title
     serialize(record, async () => {
-      if (record.closed || record.replaying) return
       await notify({ sessionId: record.id, update: sessionInfoUpdate(title) })
     })
   }
 
   /** Deliver a generic tool card on call and its terminal update on result. */
-  const deliverToolCall = (record: SessionRecord, call: { callId: string; name: string; arguments: string }): void => {    // The title reads the model's own arguments (description); the wire
-    // rawInput is the display form (workdir + command for command runners).
-    const parsed = rawInputOf(call.arguments)
-    const kind = toolKindFor(call.name)
+  const deliverToolCall = (record: SessionRecord, call: { callId: string; name: string; rawInput: unknown }): void => {
     // Follow-along: the location must reach the client while the tool runs,
     // so an `edit`'s line is inferred from the file's CURRENT content (the
     // tool has not executed yet); the sync readText seam makes the read
     // synchronous with the call-time card, and a missing file just drops
     // the line, never the location.
-    const location = toolCallLocation(parsed, record.cwd, (path) => {
+    const update = toolCallCard(call, record.cwd, (path) => {
       try {
         return readFileSync(path, 'utf8')
       } catch {
@@ -564,17 +560,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       }
     })
     serialize(record, async () => {
-      if (record.closed || record.replaying) return
-      await notify({ sessionId: record.id, update: {
-        sessionUpdate: 'tool_call',
-        toolCallId: call.callId,
-        title: toolCallTitle(kind, call.name, parsed, record.cwd),
-        name: call.name,
-        kind,
-        status: 'pending',
-        rawInput: displayRawInput(call.name, parsed, record.cwd),
-        ...(location !== undefined ? { locations: [location] } : {}),
-      } })
+      await notify({ sessionId: record.id, update })
     })
   }
 
@@ -583,22 +569,7 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     result: { callId: string; text: string; isError: boolean; name: string; rawInput: unknown; meta: unknown },
   ): void => {
     serialize(record, async () => {
-      if (record.closed || record.replaying) return
-      // Structured diff card: mutating tools project their applied hunks onto
-      // the durable tool/result meta (write/edit) or describe the change in
-      // their arguments (str_replace_editor); the confirmation text rides
-      // alongside so diff-less clients degrade to the plain text card.
-      const diffs = diffForToolCall(result.name, result.rawInput, result.meta, result.isError)
-      const textContent = toolCallContent(resultBody(result.name, result.text))
-      const content = diffs === undefined
-        ? textContent
-        : [...toolCallDiffContent(diffs, record.cwd), ...textContent ?? []]
-      await notify({ sessionId: record.id, update: {
-        sessionUpdate: 'tool_call_update',
-        toolCallId: result.callId,
-        status: result.isError ? 'failed' : 'completed',
-        ...(content !== undefined ? { content } : {}),
-      } })
+      await notify({ sessionId: record.id, update: toolResultCard(result, record.cwd) })
       pushUsage(record)
     })
   }
@@ -725,11 +696,13 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       case 'assistant/message':
         deliverAssistantMessage(record, event.data.turn, event.data.step, event.data.message.content)
         break
-      case 'tool/call':
+      case 'tool/call': {
+        const rawInput = rawInputOf(event.data.arguments)
         if (event.data.name === 'ask_user_question') askCall.set(record.id, String(event.data.callId))
-        liveCalls.set(String(event.data.callId), { name: event.data.name, rawInput: rawInputOf(event.data.arguments) })
-        deliverToolCall(record, event.data)
+        liveCalls.set(String(event.data.callId), { name: event.data.name, rawInput })
+        deliverToolCall(record, { callId: event.data.callId, name: event.data.name, rawInput })
         break
+      }
       case 'tool/result': {
         const call = toolResultCall(event.data.message)
         // The diff source pair: the call's arguments (parsed at call time; the
@@ -812,7 +785,6 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
   // or closing records are skipped.
   ctx.on('llm/adapters-updated', () => {
     for (const record of store.values()) {
-      if (record.closed || record.replaying) continue
       serialize(record, async () => {
         try {
           await notify({ sessionId: record.id, update: configOptionsUpdate(await refreshConfigOptions(record)) })
@@ -876,6 +848,39 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       ? { provider, model }
       : undefined
     return { selection, agentOptions }
+  }
+
+  /**
+   * Compose and spawn one agent, create or resume: the route defaults, the
+   * preset join (strict for a new session, best-effort for a reload), the
+   * shared model-selection + preset setup closure, and the mid-spawn close
+   * guard. Returns the handle, the selection the record keeps, and the preset
+   * actually mounted (undefined without a roster).
+   */
+  const spawnAgent = async (
+    spawn: (ready: {
+      agentOptions: { provider?: string; model?: string } | undefined
+      setup: AgentSetup
+      presetId: string | undefined
+    }) => Promise<AgentHandle>,
+    options: { presetFrom?: string | undefined; strict?: boolean; what: string },
+  ): Promise<{ handle: AgentHandle; selection: ModelSelectionRef; presetId: string | undefined }> => {
+    const { selection, agentOptions } = routeDefaults()
+    const presetId = await presetForSpawn(options.presetFrom, options.strict === true)
+    const setup: AgentSetup = async (agentCtx) => {
+      installModelSelection(agentCtx, selection)
+      if (presetId !== undefined && presets !== undefined) {
+        // The roster is our own row; a broken default must fail this
+        // session's creation loudly instead of half-composing it.
+        await presets.mount(agentCtx, presetId)
+      }
+    }
+    const handle = await spawn({ agentOptions, setup, presetId })
+    if (closed) {
+      await handle.dispose().catch(() => {})
+      throw internalError(`connection closed during ${options.what}`)
+    }
+    return { handle, selection, presetId }
   }
 
   const reasoningFor = async (provider: string, model: string): Promise<ModelReasoning | undefined> => {
@@ -1024,7 +1029,6 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     if (cached === undefined || !cached.some((option) => option.id === CONFIG_ID_PRESET)) return
     const next = cached.filter((option) => option.id !== CONFIG_ID_PRESET)
     serialize(record, async () => {
-      if (record.closed || record.replaying) return
       try {
         await notify({ sessionId: record.id, update: configOptionsUpdate(next) })
       } catch (error: unknown) {
@@ -1265,33 +1269,19 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     }
   }
 
-  /**
-   * One ordered "create-or-resume" agent handle for history loads. Returns the
-   * preset actually mounted (undefined without a roster) so the record can
-   * answer the preset select before the first refresh.
-   */
+  /** One ordered "create-or-resume" agent handle for history loads. */
   const resumeAgentFor = async (
     sessionId: SessionId,
     agentPreset: string | undefined,
   ): Promise<{
-    handle: Awaited<ReturnType<typeof agents.create>>
+    handle: AgentHandle
     selection: ModelSelectionRef
     presetId: string | undefined
-  }> => {
-    const { selection, agentOptions } = routeDefaults()
-    const presetId = agentPreset ?? await defaultPresetId()
-    const handle = await agents.resume({
-      resumeSessionId: sessionId,
-      agentOptions,
-      setup: async (agentCtx) => {
-        installModelSelection(agentCtx, selection)
-        if (presetId !== undefined && presets !== undefined) {
-          await presets.mount(agentCtx, presetId)
-        }
-      },
-    })
-    return { handle, selection, presetId }
-  }
+  }> =>
+    spawnAgent(
+      ({ agentOptions, setup }) => agents.resume({ resumeSessionId: sessionId, agentOptions, setup }),
+      { presetFrom: agentPreset, what: 'session load/resume' },
+    )
 
   /**
    * Best-effort durable delete of one session artifact (idempotent).
@@ -1379,41 +1369,29 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       assertOpen()
       validateWorkspaceParams(params)
       const sessionId = brandSessionId(randomUUID())
-      const { selection, agentOptions } = routeDefaults()
-      // Deployment-preset join: an absent roster keeps the global-layer
-      // session; a preset no root supplies (DSH_ACP_PRESET typo) is a config
-      // error surfaced as invalidParams — never a silent partial session.
-      let presetId: string | undefined
+      let spawned: Awaited<ReturnType<typeof spawnAgent>>
       try {
-        presetId = await strictDefaultPresetId()
+        spawned = await spawnAgent(
+          ({ agentOptions, setup, presetId }) => agents.create({
+            sessionId,
+            meta: { cwd: params.cwd, ...(presetId !== undefined ? { agentPreset: presetId } : {}) },
+            agentOptions,
+            setup,
+          }),
+          { strict: true, what: 'session/new' },
+        )
       } catch (error: unknown) {
+        // Deployment-preset join: an absent roster keeps the global-layer
+        // session; a default no root supplies (DSH_ACP_PRESET typo) is a
+        // config error surfaced as invalidParams, never a silent partial
+        // session.
         if (error instanceof PresetDefaultError) throw invalidParams(error.message)
-        throw error
-      }
-      let handle
-      try {
-        handle = await agents.create({
-          sessionId,
-          meta: { cwd: params.cwd, ...(presetId !== undefined ? { agentPreset: presetId } : {}) },
-          agentOptions,
-          setup: async (agentCtx) => {
-            installModelSelection(agentCtx, selection)
-            if (presetId !== undefined && presets !== undefined) {
-              // The roster is our own row; a broken default must fail this
-              // session's creation loudly instead of half-composing it.
-              await presets.mount(agentCtx, presetId)
-            }
-          },
-        })
-      } catch (error: unknown) {
+        // The mid-spawn close guard already produced its wire error.
+        if (error instanceof RequestError) throw error
         // Agent creation failures are internal (composition/route issues).
         throw internalError(`session creation failed: ${errorChain(error)}`)
       }
-      if (closed) {
-        await handle.dispose().catch(() => {})
-        throw internalError('connection closed during session/new')
-      }
-      const record = makeRecord(sessionId, params.cwd, handle, selection, { agentPreset: presetId })
+      const record = makeRecord(sessionId, params.cwd, spawned.handle, spawned.selection, { agentPreset: spawned.presetId })
       const configOptions = await registerRecord(record)
       await snapshotMounts(record)
       return { sessionId, configOptions }
@@ -1459,10 +1437,6 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
       const snapshot = query !== undefined ? await query.readSession(sessionId) : undefined
       const presetId = lastAgentPreset(snapshot?.events ?? []) ?? header.agentPreset
       const { handle, selection, presetId: mountedPreset } = await resumeAgentFor(sessionId, presetId)
-      if (closed) {
-        await handle.dispose().catch(() => {})
-        throw internalError('connection closed during session load/resume')
-      }
       const record = makeRecord(sessionId, params.cwd, handle, selection, {
         agentPreset: mountedPreset,
         turnStarted: hasStartedTurn(snapshot?.events ?? []),

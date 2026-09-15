@@ -8,15 +8,16 @@
 // deltas, usage, titles, and private presentation data stay out — mirroring
 // the live-path rules in updates.ts.
 //
-// Tool cards reproduce the live shapes exactly: the follow-along location
-// from the call arguments (no line inference — the file has moved on since
-// the logged call), and the structured diff from the persisted result meta
-// or the call's own arguments. Pure and dependency-free (dsh-session types +
-// sdk types only) so the whole mapping is unit-testable offline.
+// Tool cards reproduce the live shapes exactly through the shared builders in
+// tool-cards.ts (the follow-along location from the call arguments, no line
+// inference — the file has moved on since the logged call — and the structured
+// diff from the persisted result meta or the call's own arguments). Pure
+// (dsh-session + sdk types plus those pure builders) so the whole mapping is
+// unit-testable offline.
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { SessionNotification } from '@agentclientprotocol/sdk'
-import { assistantTextChunk, assistantThoughtChunk, toolCallContent, toolCallDiffContent, userMessageChunk } from './updates.js'
-import { diffForToolCall, displayRawInput, rawInputOf, resultBody, toolCallLocation, toolCallTitle, toolKindFor, toolResultCall } from './tool-cards.js'
+import { assistantTextChunk, assistantThoughtChunk, userMessageChunk } from './updates.js'
+import { rawInputOf, toolCallCard, toolResultCall, toolResultCard } from './tool-cards.js'
 /** Replay context per call id: the pairing a live session keeps in the firehose. */
 interface ReplayCall {
   name: string
@@ -83,35 +84,20 @@ export function replayUpdatesForEvent(
     }
     case 'tool/call': {
       const rawInput = rawInputOf(event.data.arguments)
-      const kind = toolKindFor(event.data.name)
-      const location = toolCallLocation(rawInput, context.cwd)
-      return [{
-        sessionUpdate: 'tool_call',
-        toolCallId: String(event.data.callId),
-        title: toolCallTitle(kind, event.data.name, rawInput, context.cwd),
-        name: event.data.name,
-        kind,
-        status: 'pending',
-        rawInput: displayRawInput(event.data.name, rawInput, context.cwd),
-        ...(location !== undefined ? { locations: [location] } : {}),
-      }]
+      return [toolCallCard({ callId: String(event.data.callId), name: event.data.name, rawInput }, context.cwd)]
     }
     case 'tool/result': {
       const { callId, text } = toolResultCall(event.data.message)
       if (callId === '') return []
-      const isError = event.data.error !== undefined
       const call = context.calls.get(callId)
-      const diffs = diffForToolCall(call?.name ?? '', call?.rawInput, event.data.meta, isError)
-      const textContent = toolCallContent(resultBody(call?.name ?? '', text))
-      const content = diffs === undefined
-        ? textContent
-        : [...toolCallDiffContent(diffs, context.cwd), ...textContent ?? []]
-      return [{
-        sessionUpdate: 'tool_call_update',
-        toolCallId: callId,
-        status: isError ? 'failed' : 'completed',
-        ...(content !== undefined ? { content } : {}),
-      }]
+      return [toolResultCard({
+        callId,
+        text,
+        isError: event.data.error !== undefined,
+        name: call?.name ?? '',
+        rawInput: call?.rawInput,
+        meta: event.data.meta,
+      }, context.cwd)]
     }
     default:
       return []

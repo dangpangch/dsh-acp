@@ -17,7 +17,8 @@
 // "Human-readable title describing what the tool is doing"); only
 // argument-less tools fall back to the bare name.
 import { isAbsolute, resolve, sep } from 'node:path'
-import { codeFence } from './updates.js'
+import type { SessionNotification } from '@agentclientprotocol/sdk'
+import { codeFence, toolCallContent, toolCallDiffContent } from './updates.js'
 
 /** First tool-result call id + concatenated visible text of one result message. */
 export function toolResultCall(message: {
@@ -40,7 +41,7 @@ export function toolResultCall(message: {
 }
 
 /** ACP tool-kind vocabulary used by the wire cards (schema `ToolKind`). */
-type ToolKindName = 'execute' | 'edit' | 'search' | 'read' | 'delete' | 'other'
+type ToolKindName = 'edit' | 'search' | 'read' | 'delete' | 'other'
 
 /** Coarse ACP tool-kind classification for the generic card icon. */
 export function toolKindFor(name: string): ToolKindName {
@@ -341,4 +342,53 @@ export function toolCallTitle(kind: ToolKindName, name: string, rawInput: unknow
   if (argument === undefined) return name
   const title = `${name} ${argument}`
   return title.length <= TOOL_CARD_TITLE_MAX ? title : `${title.slice(0, TOOL_CARD_TITLE_MAX)}…`
+}
+
+/**
+ * The pending `tool_call` wire card for one call — the exact frame both the
+ * live firehose and history replay send, so the two can never drift.
+ * `readText` (the file's current content) lets an `edit` report the line its
+ * `old_string` matches: the live path supplies it synchronously at call time
+ * (the tool has not run yet), replay omits it (the file has moved on).
+ */
+export function toolCallCard(
+  call: { callId: string; name: string; rawInput: unknown },
+  cwd: string,
+  readText?: (path: string) => string | undefined,
+): SessionNotification['update'] {
+  const kind = toolKindFor(call.name)
+  const location = toolCallLocation(call.rawInput, cwd, readText)
+  return {
+    sessionUpdate: 'tool_call',
+    toolCallId: call.callId,
+    title: toolCallTitle(kind, call.name, call.rawInput, cwd),
+    name: call.name,
+    kind,
+    status: 'pending',
+    rawInput: displayRawInput(call.name, call.rawInput, cwd),
+    ...(location !== undefined ? { locations: [location] } : {}),
+  }
+}
+
+/**
+ * The terminal `tool_call_update` card for one result — shared by both paths,
+ * byte-identical by construction. The structured diff (result meta hunks, else
+ * the arguments' own before/after) rides ahead of the fenced confirmation
+ * text, so diff-less clients degrade to the plain text card.
+ */
+export function toolResultCard(
+  result: { callId: string; name: string; rawInput: unknown; meta: unknown; text: string; isError: boolean },
+  cwd: string,
+): SessionNotification['update'] {
+  const diffs = diffForToolCall(result.name, result.rawInput, result.meta, result.isError)
+  const textContent = toolCallContent(resultBody(result.name, result.text))
+  const content = diffs === undefined
+    ? textContent
+    : [...toolCallDiffContent(diffs, cwd), ...textContent ?? []]
+  return {
+    sessionUpdate: 'tool_call_update',
+    toolCallId: result.callId,
+    status: result.isError ? 'failed' : 'completed',
+    ...(content !== undefined ? { content } : {}),
+  }
 }
