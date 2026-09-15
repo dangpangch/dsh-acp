@@ -295,7 +295,8 @@ llm-pi-ai:
    Zed 客户端支持（PTY 终端、project buffers），但 dsh 的工具在 agent 运行时内
    自行执行，桥只观察 session 事件（tool/call → tool/result），无工具执行缝——
    接入需要上游 harness 提供 bash 可插拔 executor / 预工具 hook。bash 里改的文件
-   因此不会出现在 Zed 的改动文件审查里（fs 工具带结构化 diff，会）。
+   因此不会出现在 Zed 的改动文件审查里（fs 工具带结构化 diff，会）。Zed 内置
+   agent tools 与本桥工具面的逐项对照见 `docs/zed-agent-tools.zh.md`。
 6. **未实现的其余客户端面**：`logout`（env-key 认证无可登出物，未广告）、URL
    elicitation（无生产者）、`compaction_*`（UNSTABLE 且需客户端广告能力）、
    `setSessionMode`/`current_mode_update`（v1 以 configOptions 取代 modes）、

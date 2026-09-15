@@ -201,7 +201,8 @@ Windows。`embeddedContext` 虽不声明（embedded resource 不是一等 prompt
 prompt。diff 卡片与 locations 属于 `tool_call`/`tool_call_update` 的可选字
 段，无需能力声明（§3.4）。MCP：非空 `mcpServers` → **接受并忽略**（不挂载
 任何 MCP 工具，stderr 记日志；真实客户端 Zed 会转发该字段，拒绝把"不支持"
-升级成"不可用"，P1-6）。
+升级成"不可用"，P1-6）。Zed 内置 agent tools 与本桥实际工具面的逐项对照
+（含 ACP 可达性与结论）见 `docs/zed-agent-tools.zh.md`。
 
 ## 4. 会话历史与回放（durable history）
 
