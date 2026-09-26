@@ -8,8 +8,11 @@ All notable changes to dsh-acp-v1 (formerly dsh-acp-interactive).
 
 - The dsh agent preset is now a session config option, not only a deployment
   field: a blank session advertises a `preset` select (`category: "preset"`,
-  built from the mounted roster with each row's id first and its display name
-  in parentheses after it), and picking one calls `agentPresets.select(agent,
+  built from the mounted roster — shipped presets render the bridge's English
+  display names (`Standard`, `PTC`, `Minimal`, `Cordis`) and descriptions,
+  since their preset files ship Chinese text, while an authored row keeps the
+  id-first label with its display name in parentheses), and picking
+  one calls `agentPresets.select(agent,
   id)` — the parent re-link
   dsh Web performs — recomposing the session's tool set, prompt sections, and
   skills on the spot. dsh refuses the switch once the session has produced a

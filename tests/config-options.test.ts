@@ -141,19 +141,36 @@ describe('permission presets', () => {
 
 describe('presetSelectOptionList (agent composition selector)', () => {
   const rows = [
-    { id: 'standard', name: '标准模式', description: 'full coding agent' },
-    { id: 'ptc', name: 'PTC 模式', description: 'programmatic tool calls' },
+    { id: 'code', name: 'Code', description: 'a locally authored composition' },
     { id: 'smoke' },
   ]
 
   it('labels each option with the id first, the display name in parentheses after it', () => {
-    const built = presetSelectOptionList(rows, 'standard')!
+    const built = presetSelectOptionList(rows, 'code')!
     expect(built.options).toEqual([
-      { value: 'standard', name: 'standard (标准模式)', description: 'full coding agent' },
-      { value: 'ptc', name: 'ptc (PTC 模式)', description: 'programmatic tool calls' },
+      { value: 'code', name: 'code (Code)', description: 'a locally authored composition' },
       { value: 'smoke', name: 'smoke', description: null },
     ])
-    expect(built.currentValue).toBe('standard')
+    expect(built.currentValue).toBe('code')
+  })
+
+  it('renders shipped presets with their English display name instead of the preset file text', () => {
+    const shipped = [
+      { id: 'standard', name: 'FILE-NAME', description: 'FILE-DESCRIPTION' },
+      { id: 'ptc', name: 'FILE-NAME', description: 'FILE-DESCRIPTION' },
+      { id: 'minimal', name: 'FILE-NAME', description: 'FILE-DESCRIPTION' },
+      { id: 'cordis', name: 'FILE-NAME', description: 'FILE-DESCRIPTION' },
+    ]
+    const built = presetSelectOptionList(shipped, 'standard')!
+    expect(built.options.map((option) => option.name)).toEqual(['Standard', 'PTC', 'Minimal', 'Cordis'])
+    expect(built.options[0]!.description).toBe(
+      'A full coding agent with file editing, shell, file and web search, skills, planning, goals, subagents, and workflows.',
+    )
+    expect(built.options[1]!.description).toContain('PTC mode SDK')
+    for (const option of built.options) {
+      expect(option.name).not.toContain('FILE-')
+      expect(option.description ?? '').not.toContain('FILE-')
+    }
   })
 
   it('never repeats an id a display name already is', () => {
@@ -162,18 +179,18 @@ describe('presetSelectOptionList (agent composition selector)', () => {
 
   it('drops broken rows: a composition dsh already refused would only fail on pick', () => {
     const built = presetSelectOptionList([...rows, { id: 'broken', broken: 'missing plugin' }], 'broken')!
-    expect(built.options.map((option) => option.value)).toEqual(['standard', 'ptc', 'smoke'])
-    expect(built.currentValue).toBe('standard')
+    expect(built.options.map((option) => option.value)).toEqual(['code', 'smoke'])
+    expect(built.currentValue).toBe('code')
   })
 
   it('returns null when no usable row exists (picker disappears, never lies)', () => {
-    expect(presetSelectOptionList([], 'standard')).toBeNull()
+    expect(presetSelectOptionList([], 'code')).toBeNull()
     expect(presetSelectOptionList([{ id: 'broken', broken: 'x' }], 'broken')).toBeNull()
   })
 
   it('falls back to the first offered id when the current preset left the roster', () => {
-    expect(presetSelectOptionList(rows, 'deleted')!.currentValue).toBe('standard')
-    expect(presetSelectOptionList(rows, undefined)!.currentValue).toBe('standard')
+    expect(presetSelectOptionList(rows, 'deleted')!.currentValue).toBe('code')
+    expect(presetSelectOptionList(rows, undefined)!.currentValue).toBe('code')
   })
 })
 

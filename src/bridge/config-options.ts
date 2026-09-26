@@ -126,6 +126,37 @@ export interface PresetChoice {
 }
 
 /**
+ * English display copy for the shipped presets. The dsh `preset.yml` files
+ * carry Chinese name/description text, and the ACP wire has no locale
+ * dictionary (dsh Web localizes shipped ids through its own `t` callback), so
+ * the bridge carries its own copy for the four shipped ids. A user-authored
+ * preset is never in this table: the shipped root wins a duplicate id, so any
+ * row named here is the shipped preset, while a local preset keeps its own
+ * (untranslated) metadata.
+ */
+const SHIPPED_PRESET_COPY: Readonly<Record<string, { readonly name: string; readonly description: string }>> = {
+  standard: {
+    name: 'Standard',
+    description:
+      'A full coding agent with file editing, shell, file and web search, skills, planning, goals, subagents, and workflows.',
+  },
+  ptc: {
+    name: 'PTC',
+    description:
+      'A full coding agent that omits the workflow tool by default; its other tools are exposed through the PTC mode SDK so the model composes multi-step work in one TypeScript program.',
+  },
+  minimal: {
+    name: 'Minimal',
+    description: 'A single-tool coding agent that provides only a persistent shell.',
+  },
+  cordis: {
+    name: 'Cordis',
+    description:
+      'For authoring custom agent presets: everything the standard preset can do, plus runtime inspection, plugin experiments, and preset authoring guidance.',
+  },
+}
+
+/**
  * Detail shown when dsh refuses a preset switch because the session already
  * started (its `agent-preset/locked` failure): the composition is fixed at the
  * first turn, so the only honest advice is a new session.
@@ -153,10 +184,12 @@ export function presetChangeFailureDetail(error: unknown): string {
  * Broken rows stay out: a composition dsh already refused to compose would
  * only fail on pick. A current id the roster no longer supplies falls back to
  * the first offered option (the same stale-route rule the model select
- * applies), so the select never points at an absent entry. The label leads
- * with the id — what `DSH_ACP_PRESET` and the session log use — and appends the
- * preset's own display name in parentheses, so neither has to be looked up by
- * memory.
+ * applies), so the select never points at an absent entry. A shipped preset
+ * renders the bridge's English display name alone (`Standard`, `PTC`,
+ * `Minimal`, `Cordis`) — its preset file carries Chinese text, and the name is
+ * not derived from the id, so the id is dropped rather than repeated. Every
+ * other row keeps the id-first label with the preset's own display name in
+ * parentheses, so `DSH_ACP_PRESET` and the session log stay discoverable.
  */
 export function presetSelectOptionList(
   rows: readonly PresetChoice[],
@@ -164,11 +197,17 @@ export function presetSelectOptionList(
 ): { options: { value: string; name: string; description: string | null }[]; currentValue: string } | null {
   const usable = rows.filter((row) => row.broken === undefined)
   if (usable.length === 0) return null
-  const options = usable.map((row) => ({
-    value: row.id,
-    name: row.name !== undefined && row.name !== row.id ? `${row.id} (${row.name})` : row.id,
-    description: row.description ?? null,
-  }))
+  const options = usable.map((row) => {
+    const copy = SHIPPED_PRESET_COPY[row.id]
+    if (copy !== undefined) {
+      return { value: row.id, name: copy.name, description: copy.description }
+    }
+    return {
+      value: row.id,
+      name: row.name !== undefined && row.name !== row.id ? `${row.id} (${row.name})` : row.id,
+      description: row.description ?? null,
+    }
+  })
   const currentValue = current !== undefined && options.some((option) => option.value === current)
     ? current
     : options[0]!.value
