@@ -41,6 +41,24 @@ All notable changes to dsh-acp-v1 (formerly dsh-acp-interactive).
   freshly published cohort in `pnpm-workspace.yaml` (`minimumReleaseAgeExclude`),
   so the pinned install stays reproducible on a clean machine.
 
+### Fixed (approval wait visibility)
+
+- **Escalation prompts now go out, and the wait is visible**: under
+  `approval: ask` the `approval/request` handler awaited `drainRecord()` →
+  `agent.whenIdle()`, which waits on the driver promise while the driver is
+  awaiting that very approval — a self-wait deadlock, so
+  `session/request_permission` was never sent before the user stopped the
+  turn (which then settled the call as `cancelled`). The handler now awaits the
+  record's `outputTail` — the same ordered delivery chain every other wire
+  write uses — and enqueues an `approvalPendingNote` `agent_message_chunk`
+  first, so a user who switched away, or returns later, can see from the
+  conversation stream that the agent is blocked on an approval. The probe stub
+  now requests a real escalation (`sandbox_permissions` + `justification`),
+  making `session/request_permission` a live-exercised variant in
+  `scripts/conformance.mjs`; `tests/permission-note.test.ts` pins the
+  note-before-request ordering and fails loudly if the request never arrives
+  (the deadlock regression). Closes #1.
+
 ### Fixed (silent regressions on the new host)
 
 - **Live streaming restored**: the durable `assistant/chunk` session event is

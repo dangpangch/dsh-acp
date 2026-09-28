@@ -3,8 +3,11 @@
 // one read, then a todo write and an ask_user_question form, then answers plain
 // text and stops.
 import { LlmAdapter } from '@deepseek-ai/dsh-llm'
-// Phase 1 writes OUTSIDE the workspace so the approval stack escalates to a
-// real session/request_permission round-trip under the workspace-write preset.
+// Phase 1 asks for a sandbox escalation (`sandbox_permissions` + `justification`)
+// so the approval stack raises a real session/request_permission round-trip
+// under the workspace-write preset. The trigger is that argument PAIR, not the
+// path: the enforcing tools only consult the approver when both are present, so
+// a bare out-of-workspace write never prompts.
 const OUTSIDE = (process.env.DSH_HOME ?? '/tmp') + '/perm-probe.txt'
 export class StubAdapter extends LlmAdapter {
   providerInfo(provider) { return { id: provider, name: 'Stub' } }
@@ -20,10 +23,11 @@ export class StubAdapter extends LlmAdapter {
       const command = 'touch "' + OUTSIDE + '"'
       yield { type: 'reasoning-delta', index: 0, text: 'The user wants the probe file written.\n' }
       yield { type: 'text-delta', index: 1, text: 'Running bash.\n' }
-      yield { type: 'tool-call-delta', index: 2, id: 'call-1', name: 'bash', argumentsDelta: JSON.stringify({ command, description: 'Write outside the workspace' }) }
+      const args1 = { command, description: 'Write outside the workspace', sandbox_permissions: 'danger-full-access', justification: 'the probe needs a wider sandbox for this write' }
+      yield { type: 'tool-call-delta', index: 2, id: 'call-1', name: 'bash', argumentsDelta: JSON.stringify(args1) }
       yield { type: 'block-end', index: 0, block: { type: 'reasoning', text: 'The user wants the probe file written.\n' } }
       yield { type: 'block-end', index: 1, block: { type: 'text', text: 'Running bash.\n' } }
-      yield { type: 'block-end', index: 2, block: { type: 'tool-call', id: 'call-1', name: 'bash', arguments: JSON.stringify({ command, description: 'Write outside the workspace' }) } }
+      yield { type: 'block-end', index: 2, block: { type: 'tool-call', id: 'call-1', name: 'bash', arguments: JSON.stringify(args1) } }
       yield { type: 'finish', reason: { kind: 'tool-calls' } }
       return
     }

@@ -1,8 +1,7 @@
-// ACP v1 schema conformance for the agent→client request builders that the
-// probe environment cannot trigger live (session/request_permission needs an
-// approval escalation the sandbox resolves by denial). The builders are the
-// exact objects the bridge sends; validating them against the SDK's generated
-// zod schemas pins the wire shapes.
+// ACP v1 schema conformance for the agent→client request builders. The probe
+// environment now exercises `session/request_permission` live (the stub
+// escalates; see scripts/conformance.mjs and tests/permission-note.test.ts);
+// these units pin the exact builder shapes offline.
 import { describe, expect, it } from 'vitest'
 import { configOptionsUpdate, elicitationRequestFor, requestPermissionRequest, sessionInfoUpdate } from '../src/bridge/updates.js'
 

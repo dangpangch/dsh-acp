@@ -78,6 +78,7 @@ import {
   type SessionRegistry,
 } from './session-store.js'
 import {
+  approvalPendingNote,
   assistantTextChunk,
   assistantThoughtChunk,
   commandsUpdate,
@@ -765,7 +766,15 @@ export function apply(ctx: Context, config: BridgeConfig = {}): void {
     if (record.allowedTools.has(request.toolName)) return Promise.resolve('allowed-once')
     if (request.callId === undefined) return next()
     const callId = request.callId
-    return drainRecord(record).then(() =>
+    // Announce the wait on the conversation stream BEFORE asking, then await
+    // that same tail so the chunk is on the wire ahead of the permission
+    // request (a user who is not looking at this agent, or comes back later,
+    // can see why it stalled — issue #1). The tail is `outputTail`, NOT
+    // `drainRecord`: drainRecord awaits agent.whenIdle(), which waits on the
+    // driver promise while the driver is awaiting THIS approval, i.e. a
+    // self-wait deadlock that never sends the request at all.
+    deliver(record, approvalPendingNote(request.toolName, request.reason))
+    return record.outputTail.then(() =>
       conn!.requestPermission(requestPermissionRequest(record.id, callId)),
     ).then(({ outcome }) => {
       if (outcome.outcome === 'cancelled') return 'cancelled'

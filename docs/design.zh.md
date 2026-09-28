@@ -186,6 +186,14 @@ dsh-acp-v1 **本质上是一个 dsh plugin**（dsh bundle 包，声明
   结果映射 `allowed-once` / `rejected` / `cancelled`；allow-always 由桥记录在
   会话级 tool allowlist（dsh 审批词表是一次性的，持久授予存桥侧，内存态），后续
   同工具请求直接自动应答；外来或无 callId 的请求 next() 放行给宿主。
+- **审批等待可见性**：`approval/request` 先把一条等待说明
+  `agent_message_chunk`（`approvalPendingNote`，形如
+  `Waiting for your approval: bash — escalate sandbox to …`）入队并**等它上线**，
+  再发 `session/request_permission`——等待期的可见性落在会话流本身，宿主只在
+  该 agent 视图内渲染权限卡片时也不会看起来像卡死（issue #1）。这里必须等
+  record 的 `outputTail` 而**不能**用 `drainRecord`：后者 `await agent.whenIdle()`，
+  而 driver 正在 `await` 本次审批本身 ⇒ 自等待死锁，请求根本发不出去
+  （0.1.5-rc.1 实测；`tests/permission-note.test.ts` 为回归门禁）。
 - **elicitation**：`ctx.userQuestions.registerProvider` + 表单
   `createElicitation`（绑定 session/tool_call_id），客户端声明
   `elicitation.form` 才启用。
@@ -249,7 +257,7 @@ prompt。diff 卡片与 locations 属于 `tool_call`/`tool_call_update` 的可�
 
 ```bash
 pnpm typecheck && pnpm build          # tsc --noEmit；tsdown -> lib/
-pnpm test                             # vitest（157 项；含真实 spawn 的帧纯净、会话历史、elicitation 门控探针）
+pnpm test                             # vitest（175 项；含真实 spawn 的帧纯净、会话历史、elicitation 门控、审批等待可见性探针）
 node scripts/conformance.mjs          # ACP v1 wire 一致性 + mount 审计（golden 精确比对）
 node scripts/preset-smoke.mjs         # 部署字段 DSH_ACP_PRESET/PROVIDER/MODEL
 node scripts/history-probe.mjs        # 会话历史端到端（隔离 DSH_HOME）

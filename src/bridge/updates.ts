@@ -239,6 +239,21 @@ export function foldTodoPlan(events: readonly SessionEvent[]): readonly { conten
 }
 
 /**
+ * The conversation-stream note for one approval request that is about to go
+ * out (issue #1): hosts that only render the permission card inside the
+ * requesting agent's view leave a user who switched away — or returns later —
+ * with no trace of why the agent stalled. This chunk is sent BEFORE
+ * `session/request_permission`, so the wait is visible from the transcript
+ * itself. Fixed English (locale is the bridge's to add later); `reason` is
+ * dsh's own human-readable escalation sentence, inlined as-is.
+ */
+export function approvalPendingNote(toolName: string, reason?: string): SessionNotification['update'] {
+  return assistantTextChunk(
+    `Waiting for your approval: ${toolName}${reason ? ` — ${reason}` : ''}. Approve or reject in the permission prompt.`,
+  )
+}
+
+/**
  * The `session/request_permission` request for one bridge-owned tool call:
  * allow-once / allow-always / reject, per the design's one-shot permission
  * answerer. An allow-always pick is honored bridge-side for the rest of the

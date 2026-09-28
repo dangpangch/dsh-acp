@@ -230,6 +230,25 @@ const client = connect(join(here, 'wire-probe.mjs'), { DSH_HOME: home, WIRE_WS: 
   check(validate(z.zPromptResponse, 'session/prompt', promptReply), 'session/prompt schema')
   check(promptReply.stopReason === 'end_turn', 'session/prompt', `stopReason ${promptReply.stopReason}`)
 
+  // ── approval visibility (issue #1): the stub's call-1 escalates, so exactly
+  // one permission round happens, and the wait note must reach the client
+  // BEFORE the request — a user returning to the session sees why the agent
+  // stalled. (The old bridge deadlocked before sending the request at all.)
+  step('approval visibility')
+  const permissionFrames = client.frames.filter((frame) =>
+    frame.id !== undefined && frame.method === 'session/request_permission')
+  check(permissionFrames.length === 1, 'approval visibility',
+    `session/request_permission frames: ${permissionFrames.length}`)
+  const permissionAt = client.frames.indexOf(permissionFrames[0])
+  const noteAt = client.frames.findIndex((frame) =>
+    frame.id === undefined && frame.method === 'session/update' &&
+    frame.params?.update?.sessionUpdate === 'agent_message_chunk' &&
+    typeof frame.params.update.content?.text === 'string' &&
+    frame.params.update.content.text.includes('Waiting for your approval'))
+  check(noteAt >= 0, 'approval visibility', 'no pending approval note was sent on the conversation stream')
+  check(noteAt < permissionAt, 'approval visibility',
+    `pending note at ${noteAt} did not precede the permission request at ${permissionAt}`)
+
   // ── preset lock: the first turn fixed the composition ─────────────────────
   // The selector leaves the client's toolbar with a full-replacement update at
   // turn/start, and a late pick is refused (dsh's own `agent-preset/locked`).

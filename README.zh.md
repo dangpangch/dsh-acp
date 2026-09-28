@@ -132,6 +132,8 @@ sessionId），随后 exit 0。
 - 会话选项：Preset（仅空白会话：首个 turn 之前可切）、Model、Thought Level、
   Write permission。
 - 权限：一次性 `session/request_permission`（allow-once / reject-once）。
+  提权等待会在权限请求之前先落一条会话流说明，因此即使不在该会话视图内也能看到
+  agent 正在等待审批。
 - 认证：`authenticate`（`DEEPSEEK_API_KEY` 或 dsh Web 凭据）；缺 key 时
   `AUTH_REQUIRED` 并带 sign-in 方法。
 - elicitation：`ask_user_question` → ACP 表单（客户端声明 `elicitation.form`

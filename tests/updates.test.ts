@@ -5,6 +5,7 @@ import type { SessionConfigOption } from '@agentclientprotocol/sdk'
 import type { SessionEvent, SessionEventMap } from '@deepseek-ai/dsh-session'
 import type { TodoItem } from '@deepseek-ai/dsh-tool-todo'
 import {
+  approvalPendingNote,
   assistantTextChunk,
   assistantThoughtChunk,
   commandsUpdate,
@@ -79,6 +80,27 @@ describe('wire builders', () => {
       sessionUpdate: 'available_commands_update',
       availableCommands: [{ name: 'goal', description: '', input: undefined }],
     })
+  })
+})
+
+describe('approvalPendingNote (issue #1: the wait must be visible in the stream)', () => {
+  it('names the tool and the reason inside one agent_message_chunk', () => {
+    expect(approvalPendingNote('bash', 'escalate sandbox to danger-full-access: commit needs it')).toEqual({
+      sessionUpdate: 'agent_message_chunk',
+      content: {
+        type: 'text',
+        text: 'Waiting for your approval: bash — escalate sandbox to danger-full-access: commit needs it. Approve or reject in the permission prompt.',
+      },
+    })
+  })
+
+  it('drops the reason clause cleanly when the asker supplied none', () => {
+    const note = approvalPendingNote('edit')
+    expect(note).toEqual({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: 'Waiting for your approval: edit. Approve or reject in the permission prompt.' },
+    })
+    expect(approvalPendingNote('edit', '')).toEqual(note)
   })
 })
 

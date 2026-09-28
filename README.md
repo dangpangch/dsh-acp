@@ -144,7 +144,9 @@ sessionId), then exit 0.
   executed inside the client.
 - Session options: Model, Thought Level, Write permission.
 - Permissions: one-shot `session/request_permission` (allow-once /
-  reject-once).
+  reject-once). A pending escalation is announced in the conversation stream
+  before the request, so the wait is visible even when you are not looking at
+  that session.
 - Auth: `authenticate` via `DEEPSEEK_API_KEY` or dsh Web credentials;
   `AUTH_REQUIRED` with a sign-in method when missing.
 - Elicitation: `ask_user_question` → ACP form (when the client declares
