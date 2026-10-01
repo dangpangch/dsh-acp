@@ -1,7 +1,7 @@
 # dsh-acp-v1 × DSH 0.2.0-rc.2 兼容性审查与迁移报告
 
 - **审查对象**: `dsh-acp-v1` 0.4.0 → 0.5.0（宿主侧 bundle 插件：把 DSH 经 ACP v1 / stdio 暴露给 Zed Agent Panel）
-- **源状态**: git `main` @ `9b89af7f`（迁移前工作树干净，仅两份未跟踪的审批计划文档）；迁移分支 `migrate-dsh-0.2.0-rc.2`
+- **源状态**: git `main` @ `9b89af7f`（迁移前工作树干净，仅两份未跟踪的审批计划文档）；迁移分支 `migrate-dsh-0.2.0-rc.2`（已合并：merge commit `86d7a78b`）
 - **审查依据**: 本地升级技能 `.agents/skills/plugin-upgrade`（Mode C）+ `.agents/skills/dsh-upgrade-audit`（npm 模式物化）；技能版本卡止于 `v0.1.2-rc.1`
 - **版本走廊**: `dsh-v0.1.5-rc.1 → dsh-v0.1.5-rc.2 → dsh-v0.1.5-rc.3 → dsh-v0.1.6-alpha.1 → dsh-v0.1.6-alpha.2 → dsh-v0.1.7-alpha.1 → dsh-v0.1.7-alpha.2 → dsh-v0.1.7-rc.1 → dsh-v0.1.7-rc.2 → dsh-v0.2.0-rc.1 → dsh-v0.2.0-rc.2`（均已在 npm 发布；`latest`/`next` = `0.2.0-rc.2`）
 - **结论**: **静态 + 运行时通过**。本段唯一真回归是 **agent-preset 架构换代**（本报告的核心）；另有一处测试夹具面的 LLM 消息形状变化。`typecheck` / `build` / 175 测试 / wire 一致性 + mount 审计 / preset-smoke 全绿；真实 `~/.dsh/profiles/acp`（宿主 `0.2.0-rc.2`）实测 `preset` 选择器恢复。
@@ -81,4 +81,4 @@ node .agents/skills/dsh-upgrade-audit/scripts/materialize-npm.mjs \
 2. **`cordis` 预置现已在 base-only 的 ACP profile 上可挂载**（本次补齐）：其 `tool-cordis` 注入的 `cordisInspect` 注册表由 web-app bundle 的宿主行 `cordis-host-runner` + `cordis-inspect-providers` 提供，本 bundle 已按同形插入这两行（host-plane，进程内注册一次）。真实 profile 实测：四个预置全部可选，`DSH_ACP_PRESET=cordis` 会话成功组合（29 工具，含 `cordis_inspect_list`/`cordis_inspect_query`）。dev boot 亦已把 `dsh-terminal`/`dsh-terminal-bash`/`dsh-tool-bash-persistent`/`dsh-tool-pwsh-persistent`/`dsh-agent-tool-presentation` 列为 devDependency，四个预置在标准独立 boot 里同样全部可挂载（`scripts/standard-mounts.json` 的 `presets` 键逐个基线化，conformance 每个预置各起一次探针比对）。
 3. **dev 与部署的预置面只剩两处细节差异**：`cordis` 的 `tool-plugin-manager` 行按 `!!js "!ctx.get('profileContext')"` 门控 —— CLI profile 有 `profileContext`（29 工具，含 `plugin_manager`），独立 dev boot 没有（28 工具，golden 即按 dev 基线）；`tool-pwsh`/`tool-pwsh-persistent` 在 POSIX 上按平台门控不激活。
 4. **未实测**：Windows（`tool-pwsh` 行 `!!js` 分支）；`session/load` 对 v3 历史日志的迁移读取（仅验证了新日志 v4 与 v0→v3 的既有路径）。`docs/approval-*-plan.zh.md` 两份未跟踪文档为**迁移前既有**工作，本次未触碰。
-5. **回滚**：迁移前 HEAD `9b89af7f` + 锁文件 + `cordis.patch.yml`/`README`/`AGENTS.md` 原文已记录于本报告；回滚 = 切回 `main`（分支 `migrate-dsh-0.2.0-rc.2` 保留）+ `pnpm install` 恢复 0.1.5-rc.1 树。`tmp/` 与 `.agents/` 为本地 gitignore，不在提交面。
+5. **回滚**：迁移前 main 尖 `9b89af7f`（连同当时的锁文件与 `cordis.patch.yml`/`README`/`AGENTS.md`）即回滚点；迁移已以 `86d7a78b` 合并进 `main`，回滚 = `git revert -m 1 86d7a78b`（尚未推送时也可 `git reset --hard 9b89af7f`）+ `pnpm install` 恢复 0.1.5-rc.1 树。`tmp/` 与 `.agents/` 为本地 gitignore，不在提交面。
