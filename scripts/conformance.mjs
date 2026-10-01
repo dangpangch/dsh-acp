@@ -31,20 +31,59 @@ const ws = join(home, 'ws')
 mkdirSync(ws)
 writeFileSync(join(ws, 'hello.txt'), 'hello from ws\n')
 // Authored preset for the preset-select scenario: a persona-only composition
-// (no host-plugin rows), so the blank-session switch is exercised even though
-// the dev composition's module graph cannot resolve the shipped
-// ptc/cordis/minimal host rows (those ship as broken rows and stay off the
-// option list).
-const probePresetDir = join(home, '.agent-presets', 'probe-preset')
-mkdirSync(probePresetDir, { recursive: true })
-writeFileSync(join(probePresetDir, 'agent.cordis.yml'), [
+// installed the way dsh 0.2.0's registry accepts one — an inserted
+// `@deepseek-ai/dsh-agent-preset` row in a patch file the dev boot appends
+// (DSH_ACP_DEV_PATCH). The shipped `ptc`/`minimal` host rows are not part of
+// this repo's module graph (their host packages are not devDependencies), so
+// those ship as broken rows and stay off the option list; the probe keeps the
+// switch scenario independent of them (`cordis` is resolvable — its two host
+// seats are devDependencies).
+const probePresetPatch = join(home, 'probe-preset.patch.yml')
+writeFileSync(probePresetPatch, [
   '# conformance probe preset: persona only, no host-plugin rows.',
-  '- id: persona',
-  "  name: '@deepseek-ai/dsh-persona'",
-  '  config:',
-  '    prefix: conformance probe preset',
+  '- insert:',
+  '    - id: preset-probe-preset',
+  "      name: '@deepseek-ai/dsh-agent-preset'",
+  '      config:',
+  '        id: probe-preset',
+  '        order: 99',
+  '        plugins:',
+  '          - id: persona',
+  "            name: '@deepseek-ai/dsh-persona'",
+  '            config:',
+  '              prefix: conformance probe preset',
   '',
 ].join('\n'))
+
+/**
+ * Boot one wire-probe session under `DSH_ACP_PRESET=<preset>` and return its
+ * mount snapshot (the sidecar the bridge writes for every new session under the
+ * snapshot gate). The alternative shipped presets compose in their own process
+ * because the deployment preset is read once at boot; auditing them here keeps
+ * a missing host package from silently shrinking the roster.
+ */
+const mountsForPreset = async (preset) => {
+  const probeHome = mkdtempSync(join(tmpdir(), `dsh-acp-${preset}-mounts-`))
+  const probeWs = join(probeHome, 'ws')
+  mkdirSync(probeWs)
+  writeFileSync(join(probeWs, 'hello.txt'), 'hello from ws\n')
+  const probe = connect(join(here, 'wire-probe.mjs'), {
+    DSH_HOME: probeHome,
+    WIRE_WS: probeWs,
+    DSH_ACP_SNAPSHOT_MOUNTS: '1',
+    DSH_ACP_PRESET: preset,
+  }, [], (frame, reply) => reply({}))
+  try {
+    await probe.req('initialize', { protocolVersion: 1, clientCapabilities: {} })
+    const created = await probe.req('session/new', { cwd: probeWs, mcpServers: [] })
+    const id = created.result?.sessionId
+    if (typeof id !== 'string') throw new Error(`session/new failed: ${JSON.stringify(created.error ?? null)}`)
+    return JSON.parse(readFileSync(join(probeHome, 'snapshots', `${id}.json`), 'utf8'))
+  } finally {
+    probe.closeStdin()
+    await probe.exitCode().catch(() => {})
+  }
+}
 
 const failures = []
 const seenMethods = new Map()
@@ -98,7 +137,7 @@ const call = async (method, params) => {
   return result
 }
 
-const client = connect(join(here, 'wire-probe.mjs'), { DSH_HOME: home, WIRE_WS: ws, DSH_ACP_SNAPSHOT_MOUNTS: '1' }, [], (frame, reply) => {
+const client = connect(join(here, 'wire-probe.mjs'), { DSH_HOME: home, WIRE_WS: ws, DSH_ACP_SNAPSHOT_MOUNTS: '1', DSH_ACP_DEV_PATCH: probePresetPatch }, [], (frame, reply) => {
   const validator = CLIENT_METHOD_VALIDATORS[frame.method]
   check(validator !== undefined, `unexpected client request method: ${frame.method}`)
   if (validator !== undefined) {
@@ -162,6 +201,22 @@ const client = connect(join(here, 'wire-probe.mjs'), { DSH_HOME: home, WIRE_WS: 
   check(mountProblems.length === 0, 'mount audit vs golden baseline',
     mountProblems.length > 0 ? `\n${mountProblems.map((p) => `  - ${p}`).join('\n')}` : '')
 
+  // ── multi-preset mount audit: every alternative shipped preset must compose
+  // its own surface too. dsh-base ships the agent-plane rows, so a roster entry
+  // whose host package is unresolvable silently disappears from the selector
+  // instead of failing — this is the gate that notices.
+  for (const [preset, expected] of Object.entries(golden.presets ?? {})) {
+    step(`mount audit preset ${preset}`)
+    try {
+      const surface = await mountsForPreset(preset)
+      const problems = compareMounts(expected, surface)
+      check(problems.length === 0, `mount audit ${preset} vs golden`,
+        problems.length > 0 ? `\n${problems.map((p) => `  - ${p}`).join('\n')}` : '')
+    } catch (error) {
+      check(false, `mount audit ${preset} vs golden`, String(error))
+    }
+  }
+
   // ── set_config_option: preset (blank-session composition switch) ──────────
   // dsh accepts a preset switch only while the session has produced no turn
   // (`agent-preset/locked` afterwards), so the select is advertised exactly
@@ -173,8 +228,12 @@ const client = connect(join(here, 'wire-probe.mjs'), { DSH_HOME: home, WIRE_WS: 
     `config option ids: ${JSON.stringify((created.configOptions ?? []).map((option) => option.id))}`)
   if (presetOption !== undefined) {
     check(presetOption.currentValue === 'standard', 'preset select current value', String(presetOption.currentValue))
+    const offered = presetOption.options.map((option) => option.value)
+    const missingShipped = ['standard', 'ptc', 'minimal', 'cordis'].filter((id) => !offered.includes(id))
+    check(missingShipped.length === 0, 'preset select offers every shipped mode',
+      `missing ${JSON.stringify(missingShipped)} of ${JSON.stringify(offered)}`)
     check(presetOption.options.some((option) => option.value === 'probe-preset'),
-      'preset select options', `authored preset missing: ${JSON.stringify(presetOption.options.map((option) => option.value))}`)
+      'preset select options', `authored preset missing: ${JSON.stringify(offered)}`)
     const switched = await call('session/set_config_option', { sessionId, configId: 'preset', value: 'probe-preset' })
     check(validate(z.zSetSessionConfigOptionResponse, 'set_config_option preset', switched), 'set_config_option schema')
     check(switched.configOptions?.find((option) => option.id === 'preset')?.currentValue === 'probe-preset',

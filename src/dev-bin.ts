@@ -5,7 +5,7 @@
 // lives in dev-boot.ts (shared with scripts/wire-probe.mjs). stdout stays
 // JSON-RPC-only; every diagnostic rides stderr.
 import { boot, installFailLoud } from '@deepseek-ai/dsh-app-boot'
-import { basePatchOps, ownPatchOps, presetOverlayOps, rootEntriesPath } from './dev-boot.js'
+import { basePatchOps, devOverlayOps, ownPatchOps, rootEntriesPath } from './dev-boot.js'
 
 const NAME = 'dsh-acp-v1-dev'
 
@@ -51,7 +51,7 @@ process.stdin.on('end', () => {
   stdinEndExits()
 })
 
-const patches = [...basePatchOps(NAME), ...ownPatchOps(NAME), ...presetOverlayOps()]
+const patches = [...basePatchOps(NAME), ...ownPatchOps(NAME), ...devOverlayOps(NAME)]
 
 app = (await boot(NAME, rootEntriesPath(NAME), patches)) as App
 

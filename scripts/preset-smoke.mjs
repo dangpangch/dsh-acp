@@ -7,15 +7,17 @@
 //   DSH_ACP_PRESET=smoke    -> session/new succeeds, the persisted session
 //                              header records agentPreset "smoke", and the
 //                              preset config option starts on "smoke" (a preset
-//                              authored into the temp $DSH_HOME user root, so
-//                              the case needs no host plugin)
+//                              declared by an inserted
+//                              `@deepseek-ai/dsh-agent-preset` row in a
+//                              DSH_ACP_DEV_PATCH overlay, so the case needs no
+//                              host plugin)
 //   unset                   -> session/new succeeds with agentPreset "standard"
 //   blank session           -> the preset select round-trips to the authored
 //                              preset and the pick survives close + resume
 //                              (dsh reads the `agentPreset` projection, not the
 //                              creation header, which keeps saying "standard")
 // Run from the repo root:  node scripts/preset-smoke.mjs
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -133,17 +135,26 @@ const run = async () => {
     const bogus = await handshake(home, { ...base, DSH_ACP_PRESET: '__bogus' }, true)
     check(bogus.header === undefined, 'bogus preset leaves no session header')
 
-    // A preset authored into the harness-home user root ($DSH_HOME/.agent-presets).
-    const smokeDir = join(home, '.agent-presets', 'smoke')
-    mkdirSync(smokeDir, { recursive: true })
-    writeFileSync(join(smokeDir, 'agent.cordis.yml'), [
+    // A preset installed the way dsh 0.2.0's registry accepts one: an inserted
+    // `@deepseek-ai/dsh-agent-preset` row in the dev overlay patch. The env var
+    // is exported so every spawned boot (handshake, switch/resume) composes it.
+    const smokePatch = join(home, 'smoke-preset.patch.yml')
+    writeFileSync(smokePatch, [
       '# smoke preset: persona only, no host-plugin rows.',
-      '- id: persona',
-      "  name: '@deepseek-ai/dsh-persona'",
-      '  config:',
-      '    prefix: smoke preset',
+      '- insert:',
+      '    - id: preset-smoke',
+      "      name: '@deepseek-ai/dsh-agent-preset'",
+      '      config:',
+      '        id: smoke',
+      '        order: 99',
+      '        plugins:',
+      '          - id: persona',
+      "            name: '@deepseek-ai/dsh-persona'",
+      '            config:',
+      '              prefix: smoke preset',
       '',
     ].join('\n'))
+    process.env.DSH_ACP_DEV_PATCH = smokePatch
     const smoke = await handshake(home, { ...base, DSH_ACP_PRESET: 'smoke' }, false)
     check(smoke.header?.agentPreset === 'smoke', 'DSH_ACP_PRESET=smoke honored', JSON.stringify(smoke.header))
     check(presetSelect(smoke.created)?.currentValue === 'smoke', 'preset select follows DSH_ACP_PRESET',

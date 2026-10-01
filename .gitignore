@@ -15,6 +15,7 @@ tmp/
 
 # local agent skills & skill registry lock
 .agents/
+.claude/
 skills-lock.json
 .zcode/
 

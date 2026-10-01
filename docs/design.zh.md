@@ -7,11 +7,11 @@
 ## 1. 定位
 
 dsh-acp-v1 **本质上是一个 dsh plugin**（dsh bundle 包，声明
-`dsh.bundle.patch: cordis.patch.yml`），目的：
+`dsh.bundle.patch: [cordis.patch.yml, presets/*.patch.yml]`），目的：
 
 - 补足 **dsh 原生 ACP 缺失的能力**：官方 `@deepseek-ai/dsh-acp` 是
   automation-only（fresh-only、committed-only、无交互面），与 Zed 的交互要求
-  不兼容；本插件是其**交互档补充**。走廊基线 = `dsh 0.1.5-rc.1`（官方同版本
+  不兼容；本插件是其**交互档补充**。走廊基线 = `dsh 0.2.0-rc.2`（官方同版本
   仍为 automation-only：不注册 `session/load`/`delete`、不发布 live delta）。
 - 把 DeepSeek Harness 作为 **Zed Editor 的自定义 agent server extension**
   提供（交互式 ACP v1 服务器，经 `dsh plugin --profile acp add <url|dir>`
@@ -29,15 +29,31 @@ dsh-acp-v1 **本质上是一个 dsh plugin**（dsh bundle 包，声明
     `personaPrefix`（首段，第一方指导之前）+ `personaSuffix`（环境说明），旧
     的单一 `persona` 键已移除；`{{model}}`/`{{cwd}}` 仍是严格插值变量；
   - `hmr.disabled: true`：ACP stdio 会话不能热重载（会撕断连接）；
-  - `agent-presets`（`@deepseek-ai/dsh-agent-presets`，`default: standard`）：
-    每个 ACP agent 由 preset 组合；部署覆盖 `DSH_ACP_PRESET` 由桥在会话创建时
-    解析/校验（见 §5，patch 层不写 `!!js`）；dsh CLI profile boot 自动补
-    shipped preset root，独立 dev boot 须自带 roots（fixture overlay）；
+  - **agent-plane 停用清单**（24 行）：dsh 0.2.0 起 dsh-base 为 TUI 默认启用
+    agent 面的工具/命令/压缩/子代理行；preset 要在同一注册表里注册同名工具，
+    因此本 bundle 先停用它们，再由每个会话的 preset 拥有该面（与官方
+    `@deepseek-ai/dsh-web-app` 同法，去掉其浏览器行）；
+  - `agent-preset-registry`（`@deepseek-ai/dsh-agent-preset-registry`，
+    `default: standard`）：0.2.0 的预设注册表；**不再扫描目录**，预设是声明行；
+  - `presets/{standard,ptc,minimal,cordis}.patch.yml`（`package.json`
+    `dsh.bundle.patch` 数组，紧随 `cordis.patch.yml`）：四个
+    `@deepseek-ai/dsh-agent-preset` 声明，逐字移植自官方 `dsh-web-app`
+    0.2.0-rc.2 的同名文件；部署覆盖 `DSH_ACP_PRESET` 仍由桥在会话创建时解析/
+    校验（见 §5，patch 层不写 `!!js`）；独立 dev boot 由 `src/dev-boot.ts`
+    读同一 `dsh.bundle.patch` 列表，另可用 `DSH_ACP_DEV_PATCH` 追加一层
+    （探针即以此声明测试预设）；
+  - `subagent-model-selection-settings`：subagent 模型选择所需的 Host-scope
+    seat（web-app bundle 自带，dsh-base 不含）；
+  - `cordis-host-runner`（`@deepseek-ai/dsh-cordis-host-runner`）+
+    `cordis-inspect-providers`（`@deepseek-ai/dsh-tool-cordis/host`）：
+    `cordis`（创造模式）预置的 `tool-cordis` 注入 `cordisInspect` 注册表，
+    这两个 host 行提供它并注册 inspect provider（进程内仅一次，重复注册会
+    被 registry 拒绝）；与官方 web-app bundle 的两行同形；
   - `dsh-acp-v1`：bridge 行（provider `deepseek-official` / model
     `deepseek-v4-flash`，客户端可经 configOptions 逐会话切换）。
 - dsh-base 提供全部宿主行（llm / agents / sessions / persistence /
   session-query / projection / approval / sandbox / commands / 工具注册 /
-  llm-deepseek 默认路由…）；未含 `agent-presets` 行与 `tool-ask-user` 行
+  llm-deepseek 默认路由…）；未含 preset 行与 `tool-ask-user` 行
   （后者由 elicitation 桥按需补 host 行 + `userQuestions` provider）。
 
 ### 2.2 进程与生命周期
@@ -180,7 +196,8 @@ dsh-acp-v1 **本质上是一个 dsh plugin**（dsh bundle 包，声明
   首个 `turn/start` 用全量替换的 `config_option_update` 撤下该项——通告面与实际可
   行能力一致；切换成功后重通告斜杠目录（skill/命令面随预设变化），load/resume 由
   日志里最后一条 `agent-preset/selected` 折叠出要挂载的预设（header 是创建事实，
-  切换后不再代表当前组合）。
+  切换后不再代表当前组合）。0.2.0 起名册是**声明式**的：registry 不扫描目录，
+  四个 shipped 组合随本包 `presets/*.patch.yml` 分发（见 §2.1）。
 - **权限**：`approval/request`（带 callId 的桥内请求）→ ACP
   `session/request_permission`（allow-once / allow-always / reject-once 三个选项），
   结果映射 `allowed-once` / `rejected` / `cancelled`；allow-always 由桥记录在
@@ -246,10 +263,10 @@ prompt。diff 卡片与 locations 属于 `tool_call`/`tool_call_update` 的可�
 | resource 块 | 不声明 embeddedContext，但优雅降级为纯文本（pi-acp 同款，见 §3.2） |
 | elicitation | userQuestions provider + createElicitation（client capability 门控） |
 | 权限档 | config option `permission`（permissionPresets.set） |
-| 预设/路由 | 部署默认：`DSH_ACP_PRESET`/`DSH_ACP_PROVIDER`/`DSH_ACP_MODEL` 由桥在会话/agent 创建时读取（改 env 需重启）。预设**是空白会话的会话选项**（config option `preset`，`agentPresets.select`）：首个 turn 前可切，`turn/start` 时撤下选择器、之后回 invalidParams（dsh `agent-preset/locked`）；新建会话对无 root 供给的默认值回 invalidParams 并列出可用预设（P1-4）。patch 行保持字面量默认值——本走廊 loader 对 patch 行 `!!js` 的求值时机不可依赖（cnctem 的 `!!js` 写法属其 rc.2 走廊，未在本走廊复现），故由桥代码统一处理 env |
+| 预设/路由 | 部署默认：`DSH_ACP_PRESET`/`DSH_ACP_PROVIDER`/`DSH_ACP_MODEL` 由桥在会话/agent 创建时读取（改 env 需重启）。预设**是空白会话的会话选项**（config option `preset`，`agentPresets.select`）：首个 turn 前可切，`turn/start` 时撤下选择器、之后回 invalidParams（dsh `agent-preset/locked`）；新建会话对名册未提供的默认值回 invalidParams 并列出可用预设（P1-4）。patch 行保持字面量默认值——本走廊 loader 对 patch 行 `!!js` 的求值时机不可依赖（cnctem 的 `!!js` 写法属其 rc.2 走廊，未在本走廊复现），故由桥代码统一处理 env |
 | MCP | 不挂载：非空 mcpServers → 接受并忽略（stderr 记录；拒绝会把 Zed 的正常请求变不可用，P1-6） |
 | 能力纪律 | 先实现、后声明（list/load/delete/resume 随实现同步开启） |
-| 走廊基线 | 精确钉 `0.1.5-rc.1`（单 cohort，无混合 peer）。迁移账本与证据见 `docs/compat-audit-0.1.5-rc.1.zh.md`；`scripts/standard-mounts.json` 随预设名册再基线化（−str_replace_editor，+present）。0.1.2-rc.1→0.1.5-rc.1 段在本地升级技能里无版本卡（卡片止于 rc.1），结论由已发布产物 + 声明面对照 + 可复现实测派生，属**已声明的缺口段** |
+| 走廊基线 | 精确钉 `0.2.0-rc.2`（单 cohort，无混合 peer）。迁移账本与证据见 `docs/compat-audit-0.2.0-rc.2.zh.md`；`scripts/standard-mounts.json` 随预设名册再基线化（−ralph：0.2.0 的 standard 声明里该工具 `disabled: true`）。0.1.5-rc.1→0.2.0-rc.2 段在本地升级技能里无版本卡（卡片止于 rc.1；该段 4102 commits），结论由 npm 物化双树 + 声明面对照 + 真实 profile 实测派生，属**已声明的缺口段** |
 
 ## 6. 验证与验收
 
@@ -258,7 +275,7 @@ prompt。diff 卡片与 locations 属于 `tool_call`/`tool_call_update` 的可�
 ```bash
 pnpm typecheck && pnpm build          # tsc --noEmit；tsdown -> lib/
 pnpm test                             # vitest（175 项；含真实 spawn 的帧纯净、会话历史、elicitation 门控、审批等待可见性探针）
-node scripts/conformance.mjs          # ACP v1 wire 一致性 + mount 审计（golden 精确比对）
+node scripts/conformance.mjs          # ACP v1 wire 一致性 + mount 审计（standard golden + 每个 shipped preset 各起一次探针比对）
 node scripts/preset-smoke.mjs         # 部署字段 DSH_ACP_PRESET/PROVIDER/MODEL
 node scripts/history-probe.mjs        # 会话历史端到端（隔离 DSH_HOME）
 # dev boot smoke（隔离 DSH_HOME）
@@ -309,8 +326,9 @@ src/bridge/catalog.ts   斜杠目录合并（命令平面 + user-invocable skill
 src/bridge/replay.ts    持久历史 → ACP 回放帧（纯函数）
 src/bridge/tool-cards.ts 卡片分类/rawInput/标题/locations/diff（标题自解释：bash=工具名+description、路径类=工具名+路径、search=pattern；纯函数）
 src/bridge/{codec,updates,content,config-options,session-store}.ts  纯映射/builder 模块（§3）
-src/dev-bin.ts          独立 dev/test boot（dsh-base + 本包 patch + presets fixture）
+src/dev-bin.ts          独立 dev/test boot（dsh-base + 本包 dsh.bundle.patch 各层 + DSH_ACP_DEV_PATCH 覆盖）
 cordis.patch.yml        bundle 补丁（§2.1）
+presets/*.patch.yml     四个 shipped 预设声明（§2.1）
 scripts/history-probe.mjs  会话历史端到端探针
 scripts/conformance.mjs    ACP v1 wire 一致性 + 挂载审计（wire-probe.mjs 引导 + acp-client 驱动）
 ```

@@ -2,7 +2,84 @@
 
 All notable changes to dsh-acp-v1 (formerly dsh-acp-interactive).
 
-## [Unreleased] — 0.4.0 (dsh 0.1.2-rc.1 → 0.1.5-rc.1)
+## [Unreleased] — 0.5.0 (dsh 0.1.5-rc.1 → 0.2.0-rc.2)
+
+### Fixed (the preset selector disappeared from Zed)
+
+- dsh 0.2.0 replaced the rooted `@deepseek-ai/dsh-agent-presets` package with
+  a declarative registry: the `agent-presets` row this bundle inserted no
+  longer imports, so `ctx.get('agentPresets')` was undefined and the bridge
+  never advertised the `preset` session option — Zed's agent panel showed
+  Model / Thought Level / Write permission but no mode selector. The bundle now
+  wires the 0.2.0 architecture: an `agent-preset-registry` row
+  (`default: standard`) plus the four shipped declarations as
+  `presets/{standard,ptc,minimal,cordis}.patch.yml`
+  (`@deepseek-ai/dsh-agent-preset` rows, listed in `package.json`
+  `dsh.bundle.patch`), and the base agent-plane rows are disabled so each
+  session's preset owns its tool surface (base now ships them enabled for the
+  TUI; leaving them on would double-register every tool). Verified on a real
+  `dsh --profile acp` 0.2.0-rc.2 deployment: `session/new` advertises
+  `preset` with Standard / PTC / Minimal / Cordis.
+
+### Added (cordis creator mode mounts on a base-only profile)
+
+- The `cordis` preset's `tool-cordis` row injects the `cordisInspect`
+  registry, which only the official web-app bundle provided — so on a
+  base-only ACP profile creator mode was a broken roster row and never
+  appeared. The bundle patch now ships the same two host rows the web-app
+  bundle uses (`cordis-host-runner` + `cordis-inspect-providers`), and the dev
+  harness depends on both packages. `DSH_ACP_PRESET=cordis` composes a session
+  (29 tools, including `cordis_inspect_list` / `cordis_inspect_query`), and
+  the preset selector offers all four modes.
+
+### Changed (corridor move)
+
+- All `@deepseek-ai/dsh-*` dependencies and devDependencies pinned
+  `0.1.5-rc.1` → `0.2.0-rc.2`; `@deepseek-ai/cordis` `4.0.2` → `4.0.4`;
+  `@deepseek-ai/schemastery` `3.18.2` → `3.18.4`; ACP SDK stays `1.4.0`.
+  `@deepseek-ai/dsh-agent-presets` is gone; the dev harness now depends on
+  `@deepseek-ai/dsh-agent-preset` + `@deepseek-ai/dsh-agent-preset-registry`.
+  Lockfile regenerated with no mixed cohort, and the pnpm 11
+  `minimumReleaseAgeExclude` list regenerated for the cohort (150 entries).
+- Evidence and the full old→new ledger: `docs/compat-audit-0.2.0-rc.2.zh.md`
+  (the upgrade skill's version cards stop at `0.1.2-rc.1`; the
+  `0.1.5-rc.1 → 0.2.0-rc.2` segment is a declared gap derived from the
+  materialized npm trees, the real profile cohort, and the repo gates).
+- Mount golden re-baselined on the new corridor: `tool-ralph` is
+  `disabled: true` in the 0.2.0 `standard` preset, so the standard surface is
+  26 tools (`scripts/standard-mounts.json`).
+
+### Changed (dev/test harness)
+
+- `DSH_ACP_PRESET_ROOT` and the `.agent-presets/<id>/` user root are gone with
+  the 0.2.0 registry ("neither scans directories nor accepts preset paths").
+  The standalone boot now loads every `dsh.bundle.patch` layer of this package
+  (via `src/dev-boot.ts`) and accepts `DSH_ACP_DEV_PATCH=<patch.yml>` to append
+  one more layer — the seam `scripts/conformance.mjs` and
+  `scripts/preset-smoke.mjs` use to author their probe presets as
+  `@deepseek-ai/dsh-agent-preset` rows.
+- `scripts/wire-stub-adapter.mjs` matches tool results on the 0.2.0 shape
+  (a first-class `role: 'tool'` message with `toolCallId`); the old
+  `tool-result` content-block probe never matched, so the stub re-issued the
+  same call forever and the approval/elicitation probes timed out.
+- `vitest.config.ts` also excludes the `.claude/` and `.zcode/` skill mirrors,
+  whose node:test self-checks are not suites of this plugin.
+- The terminal and tool-presentation host packages (`dsh-terminal`,
+  `dsh-terminal-bash`, `dsh-tool-bash-persistent`, `dsh-tool-pwsh-persistent`,
+  `dsh-agent-tool-presentation`) are devDependencies now, so the standalone
+  dev boot mounts `ptc` and `minimal` too — the dev roster matches the
+  deployment roster (six new pure-JS packages, no lifecycle scripts).
+  `scripts/standard-mounts.json` gained a `presets` map and conformance boots
+  one probe per shipped declaration (`ptc` 26 tools with `run_code` instead of
+  `workflow`, `minimal` the single persistent `bash`, `cordis` 28 tools with
+  the inspect pair), and the preset-select scenario asserts every shipped mode
+  is offered.
+- `scripts/wire-probe.mjs` gained the same EOF race guard as lib/dev-bin.ts:
+  a client that closes stdin while a slower preset composes emitted `end`
+  before the post-boot listener existed, and the lost event left the probe
+  alive with no exit path.
+
+## 0.4.0 (dsh 0.1.2-rc.1 → 0.1.5-rc.1)
 
 ### Added (pre-turn preset selector)
 

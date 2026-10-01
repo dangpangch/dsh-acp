@@ -8,7 +8,9 @@
   [Tool Permissions](https://zed.dev/docs/ai/tool-permissions)、
   [External Agents](https://zed.dev/docs/ai/external-agents)、
   [MCP](https://zed.dev/docs/ai/mcp)；ACP SDK `1.4.0`（随仓库钉住的 schema 快照）；
-  dsh cohort `0.1.5-rc.1`；standard preset 挂载面 golden `scripts/standard-mounts.json`；
+  dsh cohort `0.1.5-rc.1`（**报告时点**；2026-10-01 走廊已迁至 `0.2.0-rc.2`，standard
+  挂载面变为 26 个工具——0.2.0 的 standard 声明里 `tool-ralph` 为 `disabled: true`，
+  见 `docs/compat-audit-0.2.0-rc.2.zh.md`）；standard preset 挂载面 golden `scripts/standard-mounts.json`；
   仓库既有的 Zed 1.18 呈现假设（`docs/design.zh.md:120,163`、`README.zh.md`）
 - **结论**: **不支持**，且不是遗漏而是既有决策（`docs/design.zh.md` §3.6）。
   Zed 内置工具是 Zed 原生 agent 私有能力，ACP 没有任何"调用客户端工具"的方法；
@@ -94,21 +96,22 @@
 探针从不期待桥发起 `fs/*` 请求（客户端方法校验表只覆盖
 `session/request_permission` 与 `elicitation/create`）。
 
-### 2.3 dsh-acp 实际工具面（standard preset，27 个）
+### 2.3 dsh-acp 实际工具面（standard preset，0.2.0-rc.2 走廊 26 个）
 
-来源 `scripts/standard-mounts.json`（0.1.5-rc.1 走廊 golden）：
+来源 `scripts/standard-mounts.json`（0.2.0-rc.2 走廊 golden；报告时点 0.1.5-rc.1 为
+27 个，含 `ralph`）：
 
 ```
 ask_user_question  bash  create_goal  edit  exit_plan_mode  get_goal  glob  grep
-interrupt_agent  job_kill  job_list  job_output  list_agents  present  ralph  read
+interrupt_agent  job_kill  job_list  job_output  list_agents  present  read
 read_image  send_message  skill  subagent  subagent_fork  todo_write  update_goal
 web_fetch  web_search  workflow  write
 ```
 
-- Windows 上 `bash` 由 `pwsh` 取代（`@deepseek-ai/dsh-agent-presets` 0.1.5-rc.1 的
-  standard `agent.cordis.yml` 平台门控）。
-- 该 golden 只覆盖 `standard` preset；`minimal`/`ptc`/`cordis` 未基线化，本审计不逐项断言。
-- dsh 侧实现面（0.1.5-rc.1）：`edit`/`read`/`read_image`/`write` 来自
+- Windows 上 `bash` 由 `pwsh` 取代（本包 `presets/standard.patch.yml` 的平台门控；
+  0.2.0 起 preset 声明随本 bundle 分发，不再来自 `@deepseek-ai/dsh-agent-presets`）。
+- golden 另带 `presets` 键，逐个基线化 `ptc`（26 工具，`workflow`→`run_code`）、`minimal`（1 工具 `bash`）、`cordis`（28 工具，含 `cordis_inspect_*`）；conformance 每个预置各起一次探针比对（报告时点只覆盖 `standard`）。
+- dsh 侧实现面（0.1.5-rc.1；0.2.0 包名/行号漂移见迁移报告）：`edit`/`read`/`read_image`/`write` 来自
   `@deepseek-ai/dsh-tool-fs`，`glob`/`grep` 来自 `@deepseek-ai/dsh-tool-fs-search`，
   `bash` 来自 `@deepseek-ai/dsh-tool-bash`；`ctx.fs` 服务只提供
   `resolve/stat/lstat/readText/streamText/readBytes/readByteRange/listDir/writeText/editText`，
@@ -184,7 +187,7 @@ ACP schema 里存在 `document/didOpen|didChange|didFocus|didSave|didClose`
 grep -rn "readTextFile\|writeTextFile\|createTerminal" src/
 # 2) 桥读取了哪些客户端能力（期望：只有 elicitation）
 grep -rn "clientCapabilities" src/bridge/index.ts
-# 3) dsh 侧实际挂载面（期望：27 个工具 / 5 条 slash）
+# 3) dsh 侧实际挂载面（0.2.0-rc.2 走廊期望：26 个工具 / 5 条 slash）
 cat scripts/standard-mounts.json
 # 4) ACP 客户端方法清单（schema 的 x-side: client）
 python3 - <<'PY'
