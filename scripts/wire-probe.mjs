@@ -38,12 +38,27 @@ const patches = [
   { insert: [{ id: 'wire-stub-llm', name: stubModule }] },
 ]
 
+// EOF race guard (same shape as lib/dev-bin.ts): a client that closes stdin
+// while boot is still composing emits `end` before a post-boot listener
+// exists — and an unlistened `end` is lost forever, leaving the probe alive
+// with no exit path. Attach the listener before boot and register `resume()`
+// after it; the flag covers the end that lands during composition.
+let stdinEnded = false
+const stdinEndExits = () => {
+  setTimeout(() => process.exit(0), 400)
+}
+process.stdin.on('end', () => {
+  stdinEnded = true
+  stdinEndExits()
+})
+
 await boot(NAME, rootEntriesPath(NAME), patches)
 console.error('wire-probe: booted')
 
 process.on('SIGTERM', () => process.exit(0))
 process.on('SIGINT', () => process.exit(0))
 process.stdin.resume()
+if (stdinEnded) stdinEndExits()
 // Probe-only EOF path: a frame-dump parent closing stdin ends the probe —
-// no graceful teardown needed (isolated DSH_HOME, nothing durable).
-process.stdin.on('end', () => process.exit(0))
+// no graceful teardown needed (isolated DSH_HOME, nothing durable); the
+// pre-boot `end` listener above arms the same exit.

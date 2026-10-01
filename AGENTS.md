@@ -43,8 +43,10 @@ interactive gap left by the official automation-only `@deepseek-ai/dsh-acp`.
   mounted preset; host rows are infrastructure. dsh-base ships its
   agent-plane rows enabled for the TUI, so the bundle patch must keep them
   disabled or a preset double-registers every tool. The mount audit
-  (`scripts/standard-mounts.json`) enforces the surface — regenerate it only
-  when the corridor or preset roster legitimately changed.
+  (`scripts/standard-mounts.json`: `tools`/`slash` for the default preset, plus
+  a `presets` map conformance boots once per shipped declaration) enforces the
+  surfaces — regenerate it only when the corridor or preset roster legitimately
+  changed.
 - **Presets are declarative (dsh 0.2.0+)**: the registry scans no directories;
   a preset is an inserted `@deepseek-ai/dsh-agent-preset` row. Add one in
   `presets/` (shipped roster) or a profile patch. `DSH_ACP_DEV_PATCH` is the

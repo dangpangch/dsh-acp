@@ -110,7 +110,7 @@ web_fetch  web_search  workflow  write
 
 - Windows 上 `bash` 由 `pwsh` 取代（本包 `presets/standard.patch.yml` 的平台门控；
   0.2.0 起 preset 声明随本 bundle 分发，不再来自 `@deepseek-ai/dsh-agent-presets`）。
-- 该 golden 只覆盖 `standard` preset；`minimal`/`ptc`/`cordis` 未基线化，本审计不逐项断言。
+- golden 另带 `presets` 键，逐个基线化 `ptc`（26 工具，`workflow`→`run_code`）、`minimal`（1 工具 `bash`）、`cordis`（28 工具，含 `cordis_inspect_*`）；conformance 每个预置各起一次探针比对（报告时点只覆盖 `standard`）。
 - dsh 侧实现面（0.1.5-rc.1；0.2.0 包名/行号漂移见迁移报告）：`edit`/`read`/`read_image`/`write` 来自
   `@deepseek-ai/dsh-tool-fs`，`glob`/`grep` 来自 `@deepseek-ai/dsh-tool-fs-search`，
   `bash` 来自 `@deepseek-ai/dsh-tool-bash`；`ctx.fs` 服务只提供

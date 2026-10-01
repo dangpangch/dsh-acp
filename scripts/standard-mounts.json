@@ -1,5 +1,5 @@
 {
-  "source": "golden baseline of the standard preset mount surface on the 0.2.0-rc.2 corridor (lib/dev-bin.js + DSH_ACP_SNAPSHOT_MOUNTS=1; the 0.2.0 base ships the agent-plane rows enabled, this bundle disables them and mounts presets/standard.patch.yml, and that preset keeps tool-ralph disabled). Regenerate when the corridor or preset roster changes: boot a session under the snapshot gate and copy its sidecar here (see scripts/conformance.mjs mount audit).",
+  "source": "golden baseline of the shipped agent-preset surfaces on the 0.2.0-rc.2 corridor (lib/dev-bin.js/dev wire-probe + DSH_ACP_SNAPSHOT_MOUNTS=1; dsh-base ships the agent-plane rows enabled, this bundle disables them and mounts presets/*.patch.yml). `tools`/`slash` are the default `standard` preset; `presets` audits the alternative declarations (`cordis` shows no plugin_manager in dev because that row is gated on profileContext). Regenerate when the corridor or preset roster changes: boot a session per preset under the snapshot gate and copy its sidecar here (see scripts/conformance.mjs mount audit).",
   "tools": [
     "ask_user_question",
     "bash",
@@ -34,5 +34,92 @@
     "goal",
     "permission",
     "plan"
-  ]
+  ],
+  "presets": {
+    "ptc": {
+      "tools": [
+        "ask_user_question",
+        "bash",
+        "create_goal",
+        "edit",
+        "exit_plan_mode",
+        "get_goal",
+        "glob",
+        "grep",
+        "interrupt_agent",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "list_agents",
+        "present",
+        "read",
+        "read_image",
+        "run_code",
+        "send_message",
+        "skill",
+        "subagent",
+        "subagent_fork",
+        "todo_write",
+        "update_goal",
+        "web_fetch",
+        "web_search",
+        "write"
+      ],
+      "slash": [
+        "compact",
+        "feedback",
+        "goal",
+        "permission",
+        "plan"
+      ]
+    },
+    "minimal": {
+      "tools": [
+        "bash"
+      ],
+      "slash": [
+        "feedback",
+        "permission"
+      ]
+    },
+    "cordis": {
+      "tools": [
+        "ask_user_question",
+        "bash",
+        "cordis_inspect_list",
+        "cordis_inspect_query",
+        "create_goal",
+        "edit",
+        "exit_plan_mode",
+        "get_goal",
+        "glob",
+        "grep",
+        "interrupt_agent",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "list_agents",
+        "present",
+        "read",
+        "read_image",
+        "send_message",
+        "skill",
+        "subagent",
+        "subagent_fork",
+        "todo_write",
+        "update_goal",
+        "web_fetch",
+        "web_search",
+        "workflow",
+        "write"
+      ],
+      "slash": [
+        "compact",
+        "feedback",
+        "goal",
+        "permission",
+        "plan"
+      ]
+    }
+  }
 }

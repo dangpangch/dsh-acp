@@ -64,6 +64,20 @@ All notable changes to dsh-acp-v1 (formerly dsh-acp-interactive).
   same call forever and the approval/elicitation probes timed out.
 - `vitest.config.ts` also excludes the `.claude/` and `.zcode/` skill mirrors,
   whose node:test self-checks are not suites of this plugin.
+- The terminal and tool-presentation host packages (`dsh-terminal`,
+  `dsh-terminal-bash`, `dsh-tool-bash-persistent`, `dsh-tool-pwsh-persistent`,
+  `dsh-agent-tool-presentation`) are devDependencies now, so the standalone
+  dev boot mounts `ptc` and `minimal` too — the dev roster matches the
+  deployment roster (six new pure-JS packages, no lifecycle scripts).
+  `scripts/standard-mounts.json` gained a `presets` map and conformance boots
+  one probe per shipped declaration (`ptc` 26 tools with `run_code` instead of
+  `workflow`, `minimal` the single persistent `bash`, `cordis` 28 tools with
+  the inspect pair), and the preset-select scenario asserts every shipped mode
+  is offered.
+- `scripts/wire-probe.mjs` gained the same EOF race guard as lib/dev-bin.ts:
+  a client that closes stdin while a slower preset composes emitted `end`
+  before the post-boot listener existed, and the lost event left the probe
+  alive with no exit path.
 
 ## 0.4.0 (dsh 0.1.2-rc.1 → 0.1.5-rc.1)
 

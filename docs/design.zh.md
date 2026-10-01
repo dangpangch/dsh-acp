@@ -275,7 +275,7 @@ prompt。diff 卡片与 locations 属于 `tool_call`/`tool_call_update` 的可�
 ```bash
 pnpm typecheck && pnpm build          # tsc --noEmit；tsdown -> lib/
 pnpm test                             # vitest（175 项；含真实 spawn 的帧纯净、会话历史、elicitation 门控、审批等待可见性探针）
-node scripts/conformance.mjs          # ACP v1 wire 一致性 + mount 审计（golden 精确比对）
+node scripts/conformance.mjs          # ACP v1 wire 一致性 + mount 审计（standard golden + 每个 shipped preset 各起一次探针比对）
 node scripts/preset-smoke.mjs         # 部署字段 DSH_ACP_PRESET/PROVIDER/MODEL
 node scripts/history-probe.mjs        # 会话历史端到端（隔离 DSH_HOME）
 # dev boot smoke（隔离 DSH_HOME）

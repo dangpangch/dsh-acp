@@ -152,12 +152,12 @@ agent 预设与默认模型路由是**部署字段**，启动时从环境变量�
 
 - `DSH_ACP_PRESET` — 每个 ACP 会话由哪个预设组合（缺省 `standard`；本包随附
   `standard`、`ptc`、`minimal`、`cordis`）。取值若没有已安装预设提供，
-  `session/new` 会返回带可用预设列表的可读错误。本包随附 `cordis`（创造模式）的
-  宿主 seat（`cordis-host-runner` + `cordis-inspect-providers`），因此它在纯 base
-  profile 上也能挂载；其余非 `standard` 预设依赖 harness 安装的宿主行可解析
-  （`minimal` 需要 `dsh-terminal`；`ptc` 需要
-  `dsh-agent-tool-presentation`/`dsh-code-runtime`）——纯 base 的独立 boot 未必能
-  挂载它们。
+  `session/new` 会返回带可用预设列表的可读错误。非 `standard` 预设所需的宿主行
+  已随本包/本仓提供（`cordis` 的 `cordis-host-runner` +
+  `cordis-inspect-providers` 在 bundle patch 里；terminal 与
+
+  tool-presentation 包是 devDependencies），因此纯 base profile 与独立 dev boot
+  都能挂载全部四个模式。
 - `DSH_ACP_PROVIDER` / `DSH_ACP_MODEL` — 随包默认路由
   （`deepseek-official` / `deepseek-v4-flash`）；会话级 Model 选项仍可覆盖。
 
