@@ -177,6 +177,19 @@
     - id: subagent-model-selection-settings
       name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
 
+    # ── cordis preset host seats ──────────────────────────────────────────
+    # The `cordis` (creator) preset's `tool-cordis` row injects the
+    # `cordisInspect` registry, so the profile must provide it once on the host
+    # plane — the official web-app bundle carries the same two rows. The runner
+    # is a process-local service; the inspect providers are registered here
+    # once because the registry rejects a duplicate id, and every session's
+    # `tool-cordis` row reads the shared set through its tools.
+    - id: cordis-host-runner
+      name: '@deepseek-ai/dsh-cordis-host-runner'
+
+    - id: cordis-inspect-providers
+      name: '@deepseek-ai/dsh-tool-cordis/host'
+
     # The ACP bridge plugin: opens the AgentSideConnection over stdin/stdout
     # once the tree settles and drives ctx.agents sessions. provider/model are
     # the shipped route defaults, overridable by the bridge from

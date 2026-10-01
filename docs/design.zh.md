@@ -44,6 +44,11 @@ dsh-acp-v1 **本质上是一个 dsh plugin**（dsh bundle 包，声明
     （探针即以此声明测试预设）；
   - `subagent-model-selection-settings`：subagent 模型选择所需的 Host-scope
     seat（web-app bundle 自带，dsh-base 不含）；
+  - `cordis-host-runner`（`@deepseek-ai/dsh-cordis-host-runner`）+
+    `cordis-inspect-providers`（`@deepseek-ai/dsh-tool-cordis/host`）：
+    `cordis`（创造模式）预置的 `tool-cordis` 注入 `cordisInspect` 注册表，
+    这两个 host 行提供它并注册 inspect provider（进程内仅一次，重复注册会
+    被 registry 拒绝）；与官方 web-app bundle 的两行同形；
   - `dsh-acp-v1`：bridge 行（provider `deepseek-official` / model
     `deepseek-v4-flash`，客户端可经 configOptions 逐会话切换）。
 - dsh-base 提供全部宿主行（llm / agents / sessions / persistence /

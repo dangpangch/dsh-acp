@@ -169,11 +169,13 @@ the environment **once at boot** (changing them means restarting the agent):
 - `DSH_ACP_PRESET` — the preset every ACP session is composed from (default
   `standard`; the roster this bundle ships: `standard`, `ptc`, `minimal`,
   `cordis`). A value no installed preset supplies fails `session/new` with a
-  readable error listing the available presets. Presets beyond `standard`
-  expect the harness installation's host rows resolvable (`minimal` needs
-  `dsh-terminal`; `ptc` needs `dsh-agent-tool-presentation`/`dsh-code-runtime`;
-  `cordis` needs `dsh-tool-cordis` plus its host seats) — a base-only
-  standalone boot may not mount them.
+  readable error listing the available presets. This bundle ships the
+  `cordis` preset's host seats (`cordis-host-runner` +
+  `cordis-inspect-providers`), so creator mode mounts on a base-only profile;
+  the other non-`standard` presets expect the harness installation's host rows
+  resolvable (`minimal` needs `dsh-terminal`; `ptc` needs
+  `dsh-agent-tool-presentation`/`dsh-code-runtime`) — a base-only standalone
+  boot may not mount them.
 - `DSH_ACP_PROVIDER` / `DSH_ACP_MODEL` — the shipped default route
   (`deepseek-official` / `deepseek-v4-flash`); the per-session Model config
   option still overrides.

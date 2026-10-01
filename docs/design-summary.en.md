@@ -44,7 +44,8 @@ roster is declarative — `@deepseek-ai/dsh-agent-preset` rows registered throug
 `@deepseek-ai/dsh-agent-preset-registry`, which scans no directories — so this
 bundle ships `presets/{standard,ptc,minimal,cordis}.patch.yml` and disables
 dsh-base's agent-plane rows (enabled there for the TUI) so each session's preset
-owns its tool surface. Sessions are composed from one preset — deployment
+owns its tool surface; the `cordis` preset's host seats (`cordis-host-runner` +
+`cordis-inspect-providers`) ride in the same bundle patch. Sessions are composed from one preset — deployment
 default `standard`, overridable with `DSH_ACP_PRESET`. The
 conformance harness diffs each session's actual mounted surface against the
 golden baseline (`scripts/standard-mounts.json`), so host-plane leakage into

@@ -33,9 +33,11 @@ writeFileSync(join(ws, 'hello.txt'), 'hello from ws\n')
 // Authored preset for the preset-select scenario: a persona-only composition
 // installed the way dsh 0.2.0's registry accepts one — an inserted
 // `@deepseek-ai/dsh-agent-preset` row in a patch file the dev boot appends
-// (DSH_ACP_DEV_PATCH). The shipped ptc/cordis/minimal host rows are not part
-// of this repo's module graph, so those ship as broken rows and stay off the
-// option list; the probe keeps the switch scenario independent of them.
+// (DSH_ACP_DEV_PATCH). The shipped `ptc`/`minimal` host rows are not part of
+// this repo's module graph (their host packages are not devDependencies), so
+// those ship as broken rows and stay off the option list; the probe keeps the
+// switch scenario independent of them (`cordis` is resolvable — its two host
+// seats are devDependencies).
 const probePresetPatch = join(home, 'probe-preset.patch.yml')
 writeFileSync(probePresetPatch, [
   '# conformance probe preset: persona only, no host-plugin rows.',

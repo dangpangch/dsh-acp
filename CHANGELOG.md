@@ -19,8 +19,18 @@ All notable changes to dsh-acp-v1 (formerly dsh-acp-interactive).
   session's preset owns its tool surface (base now ships them enabled for the
   TUI; leaving them on would double-register every tool). Verified on a real
   `dsh --profile acp` 0.2.0-rc.2 deployment: `session/new` advertises
-  `preset` with Standard / PTC / Minimal (Cordis stays off where its host
-  seats are absent, unchanged behavior).
+  `preset` with Standard / PTC / Minimal / Cordis.
+
+### Added (cordis creator mode mounts on a base-only profile)
+
+- The `cordis` preset's `tool-cordis` row injects the `cordisInspect`
+  registry, which only the official web-app bundle provided — so on a
+  base-only ACP profile creator mode was a broken roster row and never
+  appeared. The bundle patch now ships the same two host rows the web-app
+  bundle uses (`cordis-host-runner` + `cordis-inspect-providers`), and the dev
+  harness depends on both packages. `DSH_ACP_PRESET=cordis` composes a session
+  (29 tools, including `cordis_inspect_list` / `cordis_inspect_query`), and
+  the preset selector offers all four modes.
 
 ### Changed (corridor move)
 
