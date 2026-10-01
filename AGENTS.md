@@ -21,7 +21,8 @@ interactive gap left by the official automation-only `@deepseek-ai/dsh-acp`.
   bundle). `dsh.bundle.patch` lists them after `cordis.patch.yml`, in order.
 - `scripts/` — dev/test harnesses: `conformance.mjs` (ACP v1 wire
   conformance + mount audit), `wire-probe.mjs` (canned stub-LLM boot),
-  `preset-smoke.mjs`, `mount-matrix.mjs`, `standard-mounts.json` (golden).
+  `preset-smoke.mjs`, `mount-matrix.mjs`, `standard-mounts.json` (golden),
+  `release-check.mjs` (the tag/release gate).
 - `tests/` — vitest: pure-helper units, spawned end-to-end probes
   (frame purity, session history, elicitation gates), seam units.
 - `docs/` — `design.zh.md` (the technical doc + decision record),
@@ -67,6 +68,34 @@ node scripts/conformance.mjs   # wire conformance + mount audit matrix
 node scripts/preset-smoke.mjs  # preset deployment fields + pre-turn selector
 ```
 
+## Releasing (tags)
+
+- A release is a commit plus an annotated tag. The tag name is exactly
+  `v${package.json.version}`, and the release commit is a standalone
+  `chore(release): X.Y.Z` carrying only `package.json`, the CHANGELOG heading
+  move (`[Unreleased]` → `[X.Y.Z] — <date>`), and the rebuilt `lib/`. Never
+  bury a version bump inside a feature/refactor commit: 0.3.0–0.5.0 all did
+  (`d72ee31d`, `fd0aa87d`, `ef15f674`), which is why no commit cleanly names
+  those releases and `git describe` used to answer `v0.2.0-18-g…`.
+- Tag the version's **last** commit — the state just before the next bump
+  (`v0.2.0` sits on the last `package.json: "0.2.0"` commit; keep that shape).
+- Tag messages record the host corridor, the fact this project actually gets
+  wrong (v0.1.0/v0.2.0 = dsh `0.1.2-rc.1`, v0.3.0 = `0.1.2-rc.1`, v0.4.0 =
+  `0.1.5-rc.1`, v0.5.0 = `0.2.0-rc.2`; the mapping table lives at the end of
+  `CHANGELOG.md`). Use two `-m` paragraphs:
+  `-m "<name> <version> — <headline>" -m "dsh corridor: <from> -> <to>"`.
+- `pnpm release:check` is the gate: version == CHANGELOG top heading ==
+  annotated `vX.Y.Z` tag, `origin/main` not ahead of HEAD, and `lib/` identical
+  to a fresh build (`--skip-build` opts out of the rebuild). When the tag is
+  missing it prints the exact `git tag -a` command, corridor included.
+- Push the commit and the tag together (`git push origin main vX.Y.Z`, or
+  `push.followTags` — it only carries annotated tags). Because `lib/` is
+  committed, the tag *is* the install boundary:
+  `dsh plugin --profile acp add github:dangpangch/dsh-acp#vX.Y.Z` is
+  reproducible; the bare URL is not (it resolves default-branch HEAD).
+- `v0.2.0` is lightweight and sits two commits past `chore: release 0.2.0`.
+  It is already public, so it stays as is — documented, never re-pointed.
+
 ## Common tasks
 
 - New wire builder / card presentation → `updates.ts` / `tool-cards.ts` with
@@ -77,3 +106,6 @@ node scripts/preset-smoke.mjs  # preset deployment fields + pre-turn selector
 - Errors surfaced to the model → named codes in `src/bridge/errors.ts`.
 - Rename/publish decisions → see plugin-write/plugin-release skills;
   public renames are compatibility-breaking.
+- Version bump or tag → `chore(release): X.Y.Z` then `pnpm release:check`
+  (see "Releasing (tags)"); a corridor move is part of the same release, so the
+  tag message carries the old→new dsh versions.

@@ -47,7 +47,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "dev:boot": "tsx src/dev-bin.ts",
-    "audit:corridor": "node scripts/audit-corridor.mjs"
+    "audit:corridor": "node scripts/audit-corridor.mjs",
+    "release:check": "node scripts/release-check.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.4.0",
