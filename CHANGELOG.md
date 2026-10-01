@@ -2,7 +2,7 @@
 
 All notable changes to dsh-acp-v1 (formerly dsh-acp-interactive).
 
-## [Unreleased] — 0.5.0 (dsh 0.1.5-rc.1 → 0.2.0-rc.2)
+## [0.5.0] — 2026-10-02 (dsh 0.1.5-rc.1 → 0.2.0-rc.2)
 
 ### Fixed (the preset selector disappeared from Zed)
 
@@ -291,3 +291,33 @@ All notable changes to dsh-acp-v1 (formerly dsh-acp-interactive).
   private; commits are local-only until you say otherwise.
 - P3-2 corridor automation — thin wrapper only (`pnpm audit:corridor`);
   P3-4 English design summary added; P3-3 delivered early with P0.
+
+## Released versions and tags
+
+The 0.1.0/0.2.0 line shipped before this changelog existed. The canonical
+mapping — tag → commit → date → package name → the dsh corridor that release
+was verified against — is kept here; the 0.3.0–0.5.0 tags were backfilled on
+2026-10-02 onto the last commit of each version's on-disk span. Tag rules live
+in `AGENTS.md` ("Releasing (tags)"), and `pnpm release:check` enforces them.
+
+| tag | commit (subject) | date | package | dsh corridor |
+|---|---|---|---|---|
+| `v0.1.0` | `7716c8bc` feat: adapt to dsh 0.1.2-rc.1 | 2026-09-05 | `dsh-acp-interactive` | `0.1.2-rc.1` |
+| `v0.2.0` | `e5e17d3e` fix: deliver in-flight ACP replies when the client closes stdin | 2026-09-06 | `dsh-acp-interactive` | `0.1.2-rc.1` |
+| `v0.3.0` | `0735fe7b` refactor: elicitation seam module + internal-path unit tests | 2026-09-09 | `dsh-acp-v1` | `0.1.2-rc.1` |
+| `v0.4.0` | `9b89af7f` fix: show the approval wait on the stream and unblock session/request_permission | 2026-09-28 | `dsh-acp-v1` | `0.1.5-rc.1` |
+| `v0.5.0` | `chore(release): 0.5.0` | 2026-10-02 | `dsh-acp-v1` | `0.2.0-rc.2` |
+
+- **0.1.0** — first tagged release: the interactive ACP v1 bridge (session
+  history, permission prompts, elicitation) adapted to dsh `0.1.2-rc.1`, with a
+  user-questions provider fallback for `0.1.1` hosts. Shipped as
+  `dsh-acp-interactive`.
+- **0.2.0** — in-flight ACP replies are delivered when the client closes stdin
+  (the tag's tip), on top of allow-always prompts, title streaming, and config
+  hot updates. Its tag is lightweight and sits two commits past
+  `chore: release 0.2.0`; the history is public, so it is documented rather than
+  re-pointed.
+- **0.3.0–0.5.0** were never tagged at the time (the version bump rode inside
+  `d72ee31d`, `fd0aa87d`, and `ef15f674`), so `git describe` answered
+  `v0.2.0-18-g…` until the backfill. The backfilled tags are annotated and
+  record the corridor in their message.
