@@ -13,8 +13,12 @@ interactive gap left by the official automation-only `@deepseek-ai/dsh-acp`.
   session-store,tool-cards,updates}.ts` — pure or injectable helpers
   (wire builders, decision tables, presentation). Keep these free of
   composition-root state.
-- `cordis.patch.yml` — the bundle patch (persona, hmr off, agent-presets,
-  subagent-model-selection seat, the bridge row). Row id = package name.
+- `cordis.patch.yml` — the bundle patch (persona, hmr off, the agent-plane
+  disable list, `agent-preset-registry`, the subagent-model-selection seat,
+  the bridge row). Row id = package name.
+- `presets/*.patch.yml` — the four shipped agent-preset declarations
+  (`@deepseek-ai/dsh-agent-preset` rows, ported from the dsh 0.2.0 web-app
+  bundle). `dsh.bundle.patch` lists them after `cordis.patch.yml`, in order.
 - `scripts/` — dev/test harnesses: `conformance.mjs` (ACP v1 wire
   conformance + mount audit), `wire-probe.mjs` (canned stub-LLM boot),
   `preset-smoke.mjs`, `mount-matrix.mjs`, `standard-mounts.json` (golden).
@@ -29,16 +33,22 @@ interactive gap left by the official automation-only `@deepseek-ai/dsh-acp`.
   rides `ctx.logger` (stderr). Probe-sidecar files are written to `$DSH_HOME`,
   never stdout.
 - **Corridor pinning**: all `@deepseek-ai/*` dependencies are pinned to the
-  audited dsh version (currently `0.1.5-rc.1`). Version bumps require the
+  audited dsh version (currently `0.2.0-rc.2`). Version bumps require the
   upgrade corridor: `pnpm audit:corridor <from> <to>` + the
   dsh-upgrade-audit skill, then re-run the mount audit golden. When the
   corridor's version cards do not cover a segment (they stop at `0.1.2-rc.1`),
   derive the absent edge from published artifacts and record the gap in
   `docs/compat-audit-<version>.zh.md` — never from memory.
 - **Presets own the model-facing surface**: tools/commands come from the
-  mounted preset; host rows are infrastructure. The mount audit
-  (`scripts/standard-mounts.json`) enforces this — regenerate it only when
-  the corridor or preset roster legitimately changed.
+  mounted preset; host rows are infrastructure. dsh-base ships its
+  agent-plane rows enabled for the TUI, so the bundle patch must keep them
+  disabled or a preset double-registers every tool. The mount audit
+  (`scripts/standard-mounts.json`) enforces the surface — regenerate it only
+  when the corridor or preset roster legitimately changed.
+- **Presets are declarative (dsh 0.2.0+)**: the registry scans no directories;
+  a preset is an inserted `@deepseek-ai/dsh-agent-preset` row. Add one in
+  `presets/` (shipped roster) or a profile patch. `DSH_ACP_DEV_PATCH` is the
+  dev/test seam for authoring one without touching the bundle.
 - **Deployment fields**: `DSH_ACP_PRESET` / `DSH_ACP_PROVIDER` /
   `DSH_ACP_MODEL` are read by the bridge at session/agent creation
   (restart to change). Do not reintroduce patch-level `!!js` for them.

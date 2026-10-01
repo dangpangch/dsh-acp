@@ -31,18 +31,25 @@ const ws = join(home, 'ws')
 mkdirSync(ws)
 writeFileSync(join(ws, 'hello.txt'), 'hello from ws\n')
 // Authored preset for the preset-select scenario: a persona-only composition
-// (no host-plugin rows), so the blank-session switch is exercised even though
-// the dev composition's module graph cannot resolve the shipped
-// ptc/cordis/minimal host rows (those ship as broken rows and stay off the
-// option list).
-const probePresetDir = join(home, '.agent-presets', 'probe-preset')
-mkdirSync(probePresetDir, { recursive: true })
-writeFileSync(join(probePresetDir, 'agent.cordis.yml'), [
+// installed the way dsh 0.2.0's registry accepts one — an inserted
+// `@deepseek-ai/dsh-agent-preset` row in a patch file the dev boot appends
+// (DSH_ACP_DEV_PATCH). The shipped ptc/cordis/minimal host rows are not part
+// of this repo's module graph, so those ship as broken rows and stay off the
+// option list; the probe keeps the switch scenario independent of them.
+const probePresetPatch = join(home, 'probe-preset.patch.yml')
+writeFileSync(probePresetPatch, [
   '# conformance probe preset: persona only, no host-plugin rows.',
-  '- id: persona',
-  "  name: '@deepseek-ai/dsh-persona'",
-  '  config:',
-  '    prefix: conformance probe preset',
+  '- insert:',
+  '    - id: preset-probe-preset',
+  "      name: '@deepseek-ai/dsh-agent-preset'",
+  '      config:',
+  '        id: probe-preset',
+  '        order: 99',
+  '        plugins:',
+  '          - id: persona',
+  "            name: '@deepseek-ai/dsh-persona'",
+  '            config:',
+  '              prefix: conformance probe preset',
   '',
 ].join('\n'))
 
@@ -98,7 +105,7 @@ const call = async (method, params) => {
   return result
 }
 
-const client = connect(join(here, 'wire-probe.mjs'), { DSH_HOME: home, WIRE_WS: ws, DSH_ACP_SNAPSHOT_MOUNTS: '1' }, [], (frame, reply) => {
+const client = connect(join(here, 'wire-probe.mjs'), { DSH_HOME: home, WIRE_WS: ws, DSH_ACP_SNAPSHOT_MOUNTS: '1', DSH_ACP_DEV_PATCH: probePresetPatch }, [], (frame, reply) => {
   const validator = CLIENT_METHOD_VALIDATORS[frame.method]
   check(validator !== undefined, `unexpected client request method: ${frame.method}`)
   if (validator !== undefined) {

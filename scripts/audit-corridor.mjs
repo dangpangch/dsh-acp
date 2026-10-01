@@ -24,7 +24,7 @@ const check = (ok, label, detail = '') => {
 }
 
 if (from === undefined || to === undefined) {
-  console.error('usage: pnpm audit:corridor <from-dsh-version> <to-dsh-version>   (e.g. 0.1.2-rc.1 0.1.5-rc.1)')
+  console.error('usage: pnpm audit:corridor <from-dsh-version> <to-dsh-version>   (e.g. 0.1.5-rc.1 0.2.0-rc.2)')
   process.exit(2)
 }
 
@@ -53,7 +53,7 @@ console.error(`
    boot a session with DSH_ACP_SNAPSHOT_MOUNTS=1 (see scripts/conformance.mjs)
    and diff/copy the sidecar into scripts/standard-mounts.json, explaining the
    change in the commit.
-5. Record the audit in docs/ (mirror docs/compat-audit-0.1.2-rc.1.zh.md).`)
+5. Record the audit in docs/ (mirror docs/compat-audit-0.2.0-rc.2.zh.md).`)
 
 if (failures.length > 0) {
   console.error(`\nCORRIDOR PREFLIGHT FAIL (${failures.length}):`)

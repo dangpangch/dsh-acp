@@ -18,7 +18,10 @@ export class StubAdapter extends LlmAdapter {
     return { provider: 'stub', id: model, name: 'stub-model', contextWindow: 128000, inputModalities: ['text'], outputModalities: ['text'] }
   }
   async *stream(options) {
-    const saw = (id) => options.messages.some((m) => m.content.some((b) => b.type === 'tool-result' && b.toolCallId === id))
+    // dsh 0.2.0 carries one tool invocation's result as a first-class
+    // `role: 'tool'` message with `toolCallId`; the pre-0.2 block-in-user-message
+    // shape is gone, so matching only on it re-issued the same call forever.
+    const saw = (id) => options.messages.some((m) => m.role === 'tool' && m.toolCallId === id)
     if (!saw('call-1')) {
       const command = 'touch "' + OUTSIDE + '"'
       yield { type: 'reasoning-delta', index: 0, text: 'The user wants the probe file written.\n' }

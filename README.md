@@ -14,11 +14,11 @@ inside the dsh sandbox with dsh's own model route.
 
 ## Requirements
 
-- dsh CLI (tested on `0.1.5-rc.1`) — install globally first:
+- dsh CLI (tested on `0.2.0-rc.2`) — install globally first:
 
   ```bash
-  npm install -g @deepseek-ai/dsh@0.1.5-rc.1
-  dsh --version   # → 0.1.5-rc.1
+  npm install -g @deepseek-ai/dsh@0.2.0-rc.2
+  dsh --version   # → 0.2.0-rc.2
   ```
 
 - pnpm (the `dsh plugin` command delegates to pnpm)
@@ -58,7 +58,7 @@ pnpm build   # tsdown -> lib/
 ### After installing: check the bundle list
 
 `dsh plugin --profile acp add` seeds a fresh profile with the CLI's template,
-which (since the 0.1.5 line) also bundles the **official automation-only
+which also bundles the **official automation-only
 `@deepseek-ai/dsh-acp-app`**. In that composition the official bridge answers
 the client (`agentInfo.name = deepseek-harness-acp`, no `session/close`, no
 live deltas) and this plugin never gets the connection.
@@ -142,7 +142,8 @@ sessionId), then exit 0.
   output rides as fenced text content in the `tool_call_update`, folding with
   the card. Commands run under dsh's own sandbox/approval; nothing is ever
   executed inside the client.
-- Session options: Model, Thought Level, Write permission.
+- Session options: Preset (while the session is still blank), Model, Thought
+  Level, Write permission.
 - Permissions: one-shot `session/request_permission` (allow-once /
   reject-once). A pending escalation is announced in the conversation stream
   before the request, so the wait is visible even when you are not looking at
@@ -166,12 +167,13 @@ The agent preset and the default model route are deployment fields, read from
 the environment **once at boot** (changing them means restarting the agent):
 
 - `DSH_ACP_PRESET` — the preset every ACP session is composed from (default
-  `standard`; shipped roster: `standard`, `minimal`, `ptc`, `cordis`). A value
-  no installed preset supplies fails `session/new` with a readable error
-  listing the available presets. Presets beyond `standard` expect the harness
-  installation's host rows resolvable (`minimal` needs `dsh-terminal`;
-  `ptc`/`cordis` need their host plugins) — a base-only standalone boot may
-  not mount them.
+  `standard`; the roster this bundle ships: `standard`, `ptc`, `minimal`,
+  `cordis`). A value no installed preset supplies fails `session/new` with a
+  readable error listing the available presets. Presets beyond `standard`
+  expect the harness installation's host rows resolvable (`minimal` needs
+  `dsh-terminal`; `ptc` needs `dsh-agent-tool-presentation`/`dsh-code-runtime`;
+  `cordis` needs `dsh-tool-cordis` plus its host seats) — a base-only
+  standalone boot may not mount them.
 - `DSH_ACP_PROVIDER` / `DSH_ACP_MODEL` — the shipped default route
   (`deepseek-official` / `deepseek-v4-flash`); the per-session Model config
   option still overrides.
@@ -185,11 +187,14 @@ first turn (`agent-preset/locked`), so the bridge drops the selector at
 thread can change it. A reloaded session re-mounts the preset its log last
 selected, not the one `DSH_ACP_PRESET` names now.
 
-Extra presets live in the per-user preset root under `$DSH_HOME`
-(`.agent-presets/<id>/`); presets such as `code`/`cordis` require their host
-plugins (`code-runtime`, `cordis-host-runner`) installed separately. A preset
-whose composition cannot mount is not offered (and a direct pick fails with a
-readable error).
+On dsh 0.2.0 the preset roster is declarative: the registry scans no
+directories, so this bundle ships the four compositions as
+`presets/<id>.patch.yml` (`@deepseek-ai/dsh-agent-preset` rows, listed in
+`package.json` `dsh.bundle.patch`) and disables dsh-base's agent-plane rows so
+each session's preset owns its tool surface. Add a preset the same way a
+deployment does: insert a `@deepseek-ai/dsh-agent-preset` row from your
+profile's own `cordis.patch.yml`. A preset whose composition cannot mount is
+not offered (and a direct pick fails with a readable error).
 
 ## Develop
 
@@ -197,17 +202,22 @@ readable error).
 pnpm install
 pnpm typecheck   # tsc --noEmit
 pnpm build       # tsdown -> lib/
-pnpm test        # vitest (171 tests incl. spawned frame-purity + history probes)
+pnpm test        # vitest (175 tests incl. spawned frame-purity + history probes)
 node scripts/conformance.mjs     # ACP v1 wire conformance + mount audit
 node scripts/preset-smoke.mjs    # deployment env fields (preset/provider/model)
 node scripts/history-probe.mjs   # session history end-to-end (isolated DSH_HOME)
 ```
 
+The dev/probe boot composes `@deepseek-ai/dsh-base` + every `dsh.bundle.patch`
+layer of this package (`cordis.patch.yml` then `presets/*.patch.yml`). Set
+`DSH_ACP_DEV_PATCH=<patch.yml>` to append one more layer — the way the probes
+author a preset, since the 0.2.0 registry scans no directories.
+
 Layout: `src/bridge/index.ts` (plugin entry), `catalog.ts` (slash catalog),
 `replay.ts` (history → ACP frames), `tool-cards.ts` (card titles/kinds),
 `{codec,updates,content,config-options,session-store}.ts` (wire builders /
 decision tables), `src/dev-bin.ts` (isolated dev/test boot),
-`cordis.patch.yml` (bundle patch).
+`cordis.patch.yml` + `presets/*.patch.yml` (bundle patch).
 
 ## Docs & license
 

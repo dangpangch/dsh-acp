@@ -3,8 +3,9 @@
 调查 dsh-acp-v1 中与"模型"和"模型选项"（configOptions）有关的全部配置面、
 数据流与边界状态。所有结论都经过源码核对或无头复现验证（2026-09-06，sdk 1.4.0 /
 dsh 0.1.2-rc.1 基线）。行号以当前工作区为准，后续提交可能漂移。
-（走廊已于 2026-09-10 迁至 dsh 0.1.5-rc.1：模型/选项语义未变，仅行号与目录项
-增加；迁移记录见 `docs/compat-audit-0.1.5-rc.1.zh.md`。）
+（走廊已于 2026-09-10 迁至 dsh 0.1.5-rc.1、2026-10-01 迁至 dsh 0.2.0-rc.2：
+模型/选项语义未变，仅行号与目录项增加；预设名册改为声明式，见
+`docs/compat-audit-0.1.5-rc.1.zh.md` 与 `docs/compat-audit-0.2.0-rc.2.zh.md`。）
 
 配套文档：整体映射见 `docs/design.zh.md`（§3.5 configOptions、§3.6 能力纪律）；
 本报告只深挖模型/选项这一条线。
@@ -209,8 +210,8 @@ Zed 在 `configOptions` 存在时忽略 `models`/`modes`（`config-options.ts:6-
 quirk），所以全部选择器必须是 config option；v1 SDK 的 `NewSessionResponse` 也没有
 `models` 字段（pi-acp 双广告的做法不适用于 v1）。预设选择器（`preset`）同理走
 config option（自定义 `category: "preset"`，与 `permission` 同款），并且只在会话
-尚未产生 turn 时通告——通告面与实际可行能力一致（`agent-presets` 的 `select` 对
-已开始会话回 `agent-preset/locked`）。
+尚未产生 turn 时通告——通告面与实际可行能力一致（0.2.0 起为
+`agent-preset-registry` 的 `select`，对已开始会话回 `agent-preset/locked`）。
 
 ### 5.2 `default_config_options` 是 Zed 侧显示预置，不发请求
 

@@ -5,13 +5,13 @@
 // acp-client.mjs) can drive a prompt and dump every session/update frame —
 // reproducing exactly what a Zed client sees for the bash card: title (the
 // command line), status, and the result's text content. The boot recipe
-// (dsh-base + our bundle patch + preset root) comes from the built
-// lib/dev-boot.js so this probe and lib/dev-bin.js cannot drift apart.
+// (dsh-base + every dsh.bundle.patch layer + the dev overlay) comes from the
+// built lib/dev-boot.js so this probe and lib/dev-bin.js cannot drift apart.
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { boot, installFailLoud } from '@deepseek-ai/dsh-app-boot'
-import { basePatchOps, ownPatchOps, presetOverlayOps, rootEntriesPath } from '../lib/dev-boot.js'
+import { basePatchOps, devOverlayOps, ownPatchOps, rootEntriesPath } from '../lib/dev-boot.js'
 
 const NAME = 'dsh-acp-wire-probe'
 const here = dirname(fileURLToPath(import.meta.url))
@@ -32,7 +32,7 @@ const stubModule = join(here, 'wire-stub-adapter.mjs')
 const patches = [
   ...basePatchOps(NAME),
   ...ownPatchOps(NAME),
-  ...presetOverlayOps(),
+  ...devOverlayOps(NAME),
   { id: 'agent-default-model', config: { provider: 'stub', model: 'stub-model' } },
   { id: 'dsh-acp-v1', config: { provider: 'stub', model: 'stub-model' } },
   { insert: [{ id: 'wire-stub-llm', name: stubModule }] },

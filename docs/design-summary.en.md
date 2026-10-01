@@ -38,10 +38,14 @@ and elicitation forms.
 
 ## Mounting & presets
 
-Model-facing rows (tools, commands, prompt sections) live in agent presets
-(`@deepseek-ai/dsh-agent-presets`); the host composition owns only
-registries and infrastructure. Sessions are composed from one preset —
-deployment default `standard`, overridable with `DSH_ACP_PRESET`. The
+Model-facing rows (tools, commands, prompt sections) live in agent presets;
+the host composition owns only registries and infrastructure. On dsh 0.2.0 the
+roster is declarative — `@deepseek-ai/dsh-agent-preset` rows registered through
+`@deepseek-ai/dsh-agent-preset-registry`, which scans no directories — so this
+bundle ships `presets/{standard,ptc,minimal,cordis}.patch.yml` and disables
+dsh-base's agent-plane rows (enabled there for the TUI) so each session's preset
+owns its tool surface. Sessions are composed from one preset — deployment
+default `standard`, overridable with `DSH_ACP_PRESET`. The
 conformance harness diffs each session's actual mounted surface against the
 golden baseline (`scripts/standard-mounts.json`), so host-plane leakage into
 an ACP session fails the run. A preset is the deployment default *and* a

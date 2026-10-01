@@ -2,8 +2,7 @@
 // that this bundle's program cannot import from their owning packages.
 //
 // `model/selection` is present in the runtime persistence catalog
-// (KNOWN_SESSION_EVENT_TYPES in 0.1.5-rc.1) but untyped across that whole
-// cohort and written by nobody — the ACP bridge is the only model-selection
+// (KNOWN_SESSION_EVENT_TYPES) but untyped across the cohort and written by nobody — the ACP bridge is the only model-selection
 // mutator within its sessions. Declaring it here types our own writes/reads:
 // `applyConfigOption` appends one snapshot per selection change and
 // `prepareHistoryResume` restores the last one, so a reloaded session
@@ -17,11 +16,11 @@
 // bridge's program still needs a local declaration to narrow `event.data` and
 // stream a title written by the title service as a `session_info_update`.
 //
-// `agent-preset/selected` is typed by @deepseek-ai/dsh-agent-presets (a
-// devDependency of this bundle: only the standalone dev/test boot names the
-// row), so the bridge's program needs the same local declaration to fold the
-// last pre-turn preset pick when a session is reloaded. The payload mirrors
-// that package's `session` module exactly.
+// `agent-preset/selected` is typed by @deepseek-ai/dsh-agent-preset-registry
+// (the 0.2.0 owner; a devDependency of this bundle, since only the standalone
+// dev/test boot names the row), so the bridge's program needs the same local
+// declaration to fold the last pre-turn preset pick when a session is
+// reloaded. The payload mirrors that package's `session` module exactly.
 //
 // The (unused) type import makes this file a module: a global-script
 // `declare module` would become an ambient declaration that shadows the real

@@ -12,11 +12,11 @@ Agent Panel 里使用 DeepSeek Harness 的 agent：建/关线程、文本与思�
 
 ## 前提
 
-- dsh CLI（验证于 `0.1.5-rc.1`）——先全局安装：
+- dsh CLI（验证于 `0.2.0-rc.2`）——先全局安装：
 
   ```bash
-  npm install -g @deepseek-ai/dsh@0.1.5-rc.1
-  dsh --version   # → 0.1.5-rc.1
+  npm install -g @deepseek-ai/dsh@0.2.0-rc.2
+  dsh --version   # → 0.2.0-rc.2
   ```
 
 - pnpm（`dsh plugin` 转发给 pnpm）
@@ -53,8 +53,8 @@ pnpm build   # tsdown -> lib/
 
 ### 装完先检查 bundle 列表
 
-`dsh plugin --profile acp add` 会按 CLI 模板初始化 profile；0.1.5 线起该模板
-还会带上**官方 automation-only 的 `@deepseek-ai/dsh-acp-app`**。那种组合下应答
+`dsh plugin --profile acp add` 会按 CLI 模板初始化 profile；该模板还会带上
+**官方 automation-only 的 `@deepseek-ai/dsh-acp-app`**。那种组合下应答
 客户端的是官方桥（`agentInfo.name = deepseek-harness-acp`，无 `session/close`、
 无 live delta），本插件拿不到连接。
 
@@ -95,8 +95,8 @@ Agent Panel 打开 "Zed Settings"）里加一个 **Custom Agent**：
 - `command` 直接写 `dsh`，前提是 `dsh` 已在 PATH（npm -g 全局安装）。若 GUI
   启动的 Zed 找不到，从已带 `dsh` 的终端启动 Zed，或给 `command` 写 dsh 的
   绝对路径。
-- 之后在 Agent Panel 新建线程并选择 `DeepSeek Harness (acp)`。线程齿轮菜单可
-  切换 Model / Thought Level / Write permission。
+- 之后在 Agent Panel 新建线程并选择 `DeepSeek Harness (acp)`。线程工具栏可切换
+  Preset（仅空白会话）、Model / Thought Level / Write permission。
 - `DEEPSEEK_API_KEY` 可放入 `agent_servers[].env`（可选）——不设则用 dsh Web
   已存的凭据。
 
@@ -150,11 +150,12 @@ sessionId），随后 exit 0。
 agent 预设与默认模型路由是**部署字段**，启动时从环境变量读取一次（改动 =
 重启 agent 后生效）：
 
-- `DSH_ACP_PRESET` — 每个 ACP 会话由哪个预设组合（缺省 `standard`；随包目录含
-  `standard`、`minimal`、`ptc`、`cordis`）。取值若没有已安装预设提供，
+- `DSH_ACP_PRESET` — 每个 ACP 会话由哪个预设组合（缺省 `standard`；本包随附
+  `standard`、`ptc`、`minimal`、`cordis`）。取值若没有已安装预设提供，
   `session/new` 会返回带可用预设列表的可读错误。`standard` 之外的预设依赖
-  harness 安装的宿主行可解析（`minimal` 需要 `dsh-terminal`；`ptc`/`cordis`
-  需要各自宿主插件）——纯 base 的独立 boot 未必能挂载它们。
+  harness 安装的宿主行可解析（`minimal` 需要 `dsh-terminal`；`ptc` 需要
+  `dsh-agent-tool-presentation`/`dsh-code-runtime`；`cordis` 需要
+  `dsh-tool-cordis` 及其宿主 seat）——纯 base 的独立 boot 未必能挂载它们。
 - `DSH_ACP_PROVIDER` / `DSH_ACP_MODEL` — 随包默认路由
   （`deepseek-official` / `deepseek-v4-flash`）；会话级 Model 选项仍可覆盖。
 
@@ -165,9 +166,12 @@ prompt 段、skills），与 dsh Web 的切换同一路径。dsh 在首个 turn 
 只能靠新线程改变。重载会话按日志里最后一次选择恢复预设，而不是当前的
 `DSH_ACP_PRESET` 值。
 
-额外预设放 `$DSH_HOME` 下的用户预设根（`.agent-presets/<id>/`）；`code`/`cordis`
-等预设需另行安装宿主插件（`code-runtime`、`cordis-host-runner`）。组合无法挂载的
-预设不会出现在选择器里（直接指定取值会得到可读错误）。
+dsh 0.2.0 起预设名册是**声明式**的：registry 不扫描目录，因此本包把四个组合作为
+`presets/<id>.patch.yml`（`@deepseek-ai/dsh-agent-preset` 行，登记在 `package.json`
+的 `dsh.bundle.patch`）随包分发，并停用 dsh-base 的 agent-plane 行，使每个会话的
+预设拥有自己的工具面。新增预设与部署同法：在 profile 自己的 `cordis.patch.yml`
+里插一行 `@deepseek-ai/dsh-agent-preset`。组合无法挂载的预设不会出现在选择器里
+（直接指定取值会得到可读错误）。
 
 ## 开发
 
@@ -175,17 +179,22 @@ prompt 段、skills），与 dsh Web 的切换同一路径。dsh 在首个 turn 
 pnpm install
 pnpm typecheck   # tsc --noEmit
 pnpm build       # tsdown -> lib/
-pnpm test        # vitest（171 项，含真实 spawn 的帧纯净与会话历史探针）
+pnpm test        # vitest（175 项，含真实 spawn 的帧纯净与会话历史探针）
 node scripts/conformance.mjs     # ACP v1 wire 一致性 + 挂载审计
 node scripts/preset-smoke.mjs    # 部署字段（preset/provider/model）
 node scripts/history-probe.mjs   # 会话历史端到端（隔离 DSH_HOME）
 ```
 
+dev/探针 boot = `@deepseek-ai/dsh-base` + 本包 `dsh.bundle.patch` 的每一层
+（`cordis.patch.yml`，随后 `presets/*.patch.yml`）。设
+`DSH_ACP_DEV_PATCH=<patch.yml>` 可再追加一层——探针即以此声明测试预设，因为
+0.2.0 的 registry 不扫描目录。
+
 布局：`src/bridge/index.ts`（插件入口）、`catalog.ts`（斜杠目录）、
 `replay.ts`（历史 → ACP 帧）、`tool-cards.ts`（卡片标题/分类）、
 `{codec,updates,content,config-options,session-store}.ts`（wire builder / 决策表）、
 `src/dev-bin.ts`（隔离 dev/test boot）、
-`cordis.patch.yml`（bundle 补丁）。
+`cordis.patch.yml` + `presets/*.patch.yml`（bundle 补丁）。
 
 ## 文档与许可
 
